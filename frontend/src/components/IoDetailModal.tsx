@@ -27,7 +27,7 @@ interface IoDetail {
   requestCostCenter: string | null;
 }
 
-const peso = (n: number | null) => (n === null || n === undefined ? "—" : `₱${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+const peso = (n: number | null) => (n === null || n === undefined ? "—" : `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
 
 function Field({ label, value }: { label: string; value: string | null }) {
   return (

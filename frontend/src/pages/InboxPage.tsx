@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, requestLineDisplay, type AdditionalHeadcountRequest, type BudgetRequest, type DemoUser, type HeadcountReviewDecision, type MobilePhoneBudgetRequest, type Office365AccountRequest, type ReviewDecision, type RevenueBatchSummary } from "../api/client";
+import { api, downloadFile, requestLineDisplay, type AdditionalHeadcountRequest, type BudgetRequest, type DemoUser, type HeadcountReviewDecision, type MobilePhoneBudgetRequest, type Office365AccountRequest, type ReviewDecision, type RevenueBatchSummary } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { SearchableSelect } from "../components/SearchableSelect";
 import { PageHeader } from "../components/PageHeader";
@@ -48,7 +48,7 @@ function MyReturnedRequestsSection() {
                 <div className="font-medium text-emerald-800">{requestLineDisplay(r).name}</div>
                 <div className="text-xs text-slate-500">
                   {r.department.name}
-                  {requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · ₱{r.proposedAmount.toLocaleString()}
+                  {requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · {r.proposedAmount.toLocaleString()}
                 </div>
               </div>
               <StatusBadge stage={r.currentStage} />
@@ -413,7 +413,7 @@ function ForecastInboxSection() {
 }
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 const REVENUE_DECISION_ENDPOINT: Record<string, string> = {
@@ -631,7 +631,7 @@ function ReviewHistorySection() {
     ...budgetHistory.map((r) => ({
       id: `budget-${r.id}`,
       label: requestLineDisplay(r).name,
-      sublabel: `${r.department.name}${requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · ₱${r.proposedAmount.toLocaleString()}`,
+      sublabel: `${r.department.name}${requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · ${r.proposedAmount.toLocaleString()}`,
       link: `/requests/${r.id}`,
       decision: r.myDecision,
     })),
@@ -757,6 +757,34 @@ export function InboxPage() {
     onError: (err: any) => setError(err.response?.data?.error ?? "Cancel failed."),
   });
 
+  // "Approve Selected" - lets an approver proceed several requests at once
+  // instead of one Review toggle at a time. Calls the same per-item
+  // decideRequest as the single "Proceed to next stage" button above (via
+  // POST /budget-requests/bulk-decision), so every normal check (role
+  // assignment, due dates, the GAE forecast gate, the Budget-Officer-stage
+  // block) still runs per item - a failing one is reported, not silently
+  // skipped or force-approved.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkResult, setBulkResult] = useState<{ succeeded: string[]; failed: { id: string; error: string }[] } | null>(null);
+  const bulkApprove = useMutation({
+    mutationFn: async () => (await api.post<{ succeeded: string[]; failed: { id: string; error: string }[] }>("/budget-requests/bulk-decision", { ids: Array.from(selected) })).data,
+    onSuccess: (data) => {
+      setBulkResult(data);
+      setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["inbox"] });
+      queryClient.invalidateQueries({ queryKey: ["reviewed-by-me"] });
+      queryClient.invalidateQueries({ queryKey: ["my-requests"] });
+    },
+  });
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   if (isLoading) return <div className="text-sm text-slate-400">Loading…</div>;
 
   return (
@@ -768,13 +796,50 @@ export function InboxPage() {
       <MobilePhoneBudgetInboxSection />
       <ForecastInboxSection />
       <RevenueBatchInboxSection />
+      {bulkResult && (
+        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+          <div className="mb-1 font-medium text-emerald-700">{bulkResult.succeeded.length} request(s) approved.</div>
+          {bulkResult.failed.length > 0 && (
+            <>
+              <div className="mb-1 font-medium text-red-700">{bulkResult.failed.length} couldn't be approved:</div>
+              <ul className="max-h-40 list-disc space-y-0.5 overflow-y-auto pl-4 text-red-700">
+                {bulkResult.failed.map((f) => {
+                  const req = requests.find((r) => r.id === f.id);
+                  return (
+                    <li key={f.id}>
+                      <span className="font-medium">{req ? requestLineDisplay(req).name : f.id}:</span> {f.error}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
       {requests.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-white/60 p-6 text-center text-sm text-slate-400">Nothing waiting on you right now.</div>
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="rounded bg-emerald-700 px-2 py-0.5 text-xs font-bold text-white">{requests.length}</span>
             <h2 className="text-sm font-semibold tracking-wide text-emerald-800">Budget Requests</h2>
+            <label className="ml-2 flex items-center gap-1.5 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={selected.size > 0 && selected.size === requests.length}
+                onChange={(e) => setSelected(e.target.checked ? new Set(requests.map((r) => r.id)) : new Set())}
+              />
+              Select all
+            </label>
+            {selected.size > 0 && (
+              <button
+                onClick={() => bulkApprove.mutate()}
+                disabled={bulkApprove.isPending}
+                className="rounded bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+              >
+                {bulkApprove.isPending ? "Approving…" : `Approve Selected (${selected.size})`}
+              </button>
+            )}
           </div>
           {requests.map((r) => {
             const isOpen = expanded === r.id;
@@ -784,14 +849,25 @@ export function InboxPage() {
             return (
               <div key={r.id} className="rounded-lg border border-slate-200 border-l-4 border-l-amber-400 bg-white p-4 text-sm shadow-sm">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-medium tracking-wide text-slate-400">{requestLineDisplay(r).category}</div>
-                    <Link to={`/requests/${r.id}`} className="font-medium text-emerald-800 hover:underline">
-                      {requestLineDisplay(r).name}
-                    </Link>
-                    <div className="text-xs text-slate-500">
-                      {r.department.name}
-                      {requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · ₱{r.proposedAmount.toLocaleString()} · by {r.createdBy.name}
+                  <div className="flex items-start gap-3">
+                    <input type="checkbox" className="mt-1" checked={selected.has(r.id)} onChange={() => toggleSelected(r.id)} />
+                    <div>
+                      <div className="text-xs font-medium tracking-wide text-slate-400">{requestLineDisplay(r).category}</div>
+                      <Link to={`/requests/${r.id}`} className="font-medium text-emerald-800 hover:underline">
+                        {requestLineDisplay(r).name}
+                      </Link>
+                      <div className="text-xs text-slate-500">
+                        {r.department.name}
+                        {requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · {r.proposedAmount.toLocaleString()} · by {r.createdBy.name}
+                      </div>
+                      {r.bulkUploadBatch && (
+                        <button
+                          onClick={() => downloadFile(`/budget-requests/bulk-upload/${r.bulkUploadBatch!.id}/source-file`, r.bulkUploadBatch!.sourceFileRef)}
+                          className="mt-1 text-xs text-emerald-700 hover:underline"
+                        >
+                          Download source file
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SortableHeader } from "../components/SortableHeader";
+import { useTableSort } from "../lib/useTableSort";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, downloadFile, type Department, type RequestCategory } from "../api/client";
@@ -8,7 +10,7 @@ import { PageHeader } from "../components/PageHeader";
 import { SBU_BATCH_TYPES, SbuTypeSwitch } from "../components/SbuTypeSwitch";
 import { SbuBatchUploadTab } from "./newRequest/SbuBatchUploadTab";
 import { SectionLabel } from "../components/TabBar";
-import { ExpandableSection } from "../components/ExpandableSection";
+import { ExpandableSection, ExpandButton } from "../components/ExpandableSection";
 import { useFiscalYear, type FiscalCycleConfig } from "../lib/fiscalCycle";
 import { timeAgo } from "../lib/timeAgo";
 import { NpcForecastView } from "./NpcForecastView";
@@ -138,14 +140,14 @@ function sortHistoricalActualsRows(rows: HistoricalActualsRow[]): HistoricalActu
 // non-abbreviated peso figure so hovering shows the exact number. `value`
 // of null/undefined renders as "—" (a Remaining Months Forecast cell with
 // nothing entered yet) rather than a misleading 0. `thousands` shows the
-// value divided by 1,000 instead (see the Total row's own "(₱'000)" label
+// value divided by 1,000 instead (see the Total row's own "(PHP '000)" label
 // below) - those are already the widest figures in the table (a sum of
 // every row), so abbreviating just that row is what actually keeps it from
 // overflowing its column, rather than shrinking every row's own figures too.
 function AmountTd({
   value,
   className = "",
-  padding = "px-1.5 py-0.5",
+  padding = "px-2 py-1",
   thousands = false,
 }: {
   value: number | null | undefined;
@@ -162,7 +164,7 @@ function AmountTd({
   }
   const displayText = thousands ? (value / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 }) : value.toLocaleString();
   return (
-    <td className={`truncate ${padding} text-right align-top ${className}`} title={value.toLocaleString()}>
+    <td className={`truncate tabular-nums ${padding} text-right align-top ${className}`} title={value.toLocaleString()}>
       {displayText}
     </td>
   );
@@ -196,6 +198,41 @@ function GaeForecastTable({
   consolidated?: boolean;
 }) {
   const [detailRow, setDetailRow] = useState<(HistoricalActualsRow & { departmentName?: string }) | null>(null);
+  const [searchText, setSearchText] = useState("");
+  const visibleRows = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    return rows.filter(
+      (r) =>
+        (!q ||
+          r.glDescription.toLowerCase().includes(q) ||
+          (r.budgetCode ?? "").toLowerCase().includes(q) ||
+          (r.expenseCategory ?? "").toLowerCase().includes(q))
+    );
+  }, [rows, searchText]);
+  const filtersActive = !!searchText.trim();
+  const getSortValue = useCallback((r: HistoricalActualsRow & { departmentName?: string }, key: string): string | number | null => {
+    switch (key) {
+      case "budgetCode":
+        return r.budgetCode ?? null;
+      case "category":
+        return r.expenseCategory ?? null;
+      case "lineItem":
+        return r.glDescription;
+      case "approved":
+        return r.approvedBudget2026;
+      case "ytd":
+        return r.ytdActuals2026;
+      case "available":
+        return r.availableBudget2026;
+      case "totalForecast":
+        return r.totalActualForecast;
+      case "remaining":
+        return r.remainingBudget2026;
+      default:
+        return null;
+    }
+  }, []);
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(visibleRows, getSortValue);
 
   // Same 3 frozen columns as always, plus a leading Department column when
   // consolidated - computed locally (not the module-level FROZEN_LEFT_PX/
@@ -205,7 +242,7 @@ function GaeForecastTable({
   const localColWidthPx = (i: number): number => (i < frozenWidths.length ? frozenWidths[i] : COL_WIDTH_PX);
   const columnCount = frozenWidths.length + 3 + remainingMonths.length + 1 + 2;
 
-  const totals = rows.reduce(
+  const totals = visibleRows.reduce(
     (acc, r) => {
       acc.approvedBudget2026 += r.approvedBudget2026;
       acc.ytdActuals2026 += r.ytdActuals2026;
@@ -222,6 +259,34 @@ function GaeForecastTable({
   );
 
   return (
+    <>
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+      <input
+        type="search"
+        value={searchText}
+        onChange={(e) => setSearchText(e.target.value)}
+        placeholder="Filter by Budget Code, Expense Category, or Expense Line Item…"
+        className="w-96 rounded border border-slate-300 px-2 py-1"
+      />
+      {filtersActive && (
+        <button
+          type="button"
+          onClick={() => {
+            setSearchText("");
+          }}
+          className="text-emerald-700 hover:underline"
+        >
+          Clear filters
+        </button>
+      )}
+    </div>
+    <div className="mb-1 flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-xs italic text-slate-500">All amounts are in PHP.</p>
+        <span className="text-xs text-slate-500">Showing {visibleRows.length} of {rows.length} line item(s)</span>
+      </div>
+      <ExpandButton />
+    </div>
     <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
       <table
         className="table-fixed text-xs"
@@ -232,89 +297,74 @@ function GaeForecastTable({
             <col key={i} style={{ width: localColWidthPx(i) }} />
           ))}
         </colgroup>
-        <thead className="sticky top-0 z-20 bg-emerald-50 text-left text-[11px] tracking-wide text-emerald-800">
+        <thead className="sticky top-0 z-20 bg-[#edf6f1] text-left text-[12px] font-semibold text-[#164b33]">
           <tr>
             {consolidated && (
-              <th rowSpan={2} className="sticky z-30 break-words bg-emerald-50 px-1.5 py-1 align-bottom" style={{ left: frozenLeft[0] }}>
+              <th rowSpan={2} className="sticky z-30 bg-emerald-50 px-2 py-2 text-left align-middle leading-tight" style={{ left: frozenLeft[0] }}>
                 Department
               </th>
             )}
-            <th rowSpan={2} className="sticky z-30 break-words bg-emerald-50 px-1.5 py-1 align-bottom" style={{ left: frozenLeft[consolidated ? 1 : 0] }}>
-              Budget Code
-            </th>
-            <th rowSpan={2} className="sticky z-30 break-words bg-emerald-50 px-1.5 py-1 align-bottom" style={{ left: frozenLeft[consolidated ? 2 : 1] }}>
-              Expense Category
-            </th>
-            <th rowSpan={2} className="sticky z-30 break-words bg-emerald-50 px-1.5 py-1 align-bottom" style={{ left: frozenLeft[consolidated ? 3 : 2] }}>
-              Expense Line Item
-            </th>
-            <th rowSpan={2} className="break-words px-1.5 py-1 text-right align-bottom">
-              {forecastYear} Approved Budget
-            </th>
-            <th rowSpan={2} className="break-words px-1.5 py-1 text-right align-bottom">
-              {forecastYear} YTD Actuals
-            </th>
-            <th rowSpan={2} className="break-words px-1.5 py-1 text-right align-bottom">
-              {forecastYear} Available Budget
-            </th>
-            <th colSpan={remainingMonths.length + 1} className="break-words px-1.5 py-1 text-center">
+            <SortableHeader rowSpan={2} label="Budget Code" sortKey="budgetCode" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="sticky z-30 bg-[#edf6f1] px-2 py-2 align-middle leading-tight" style={{ left: frozenLeft[consolidated ? 1 : 0] }} />
+            <SortableHeader rowSpan={2} label="Expense Category" sortKey="category" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="sticky z-30 bg-[#edf6f1] px-2 py-2 align-middle leading-tight" style={{ left: frozenLeft[consolidated ? 2 : 1] }} />
+            <SortableHeader rowSpan={2} label="Expense Line Item" sortKey="lineItem" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="sticky z-30 bg-[#edf6f1] px-2 py-2 align-middle leading-tight" style={{ left: frozenLeft[consolidated ? 3 : 2] }} />
+            <SortableHeader rowSpan={2} label="Approved Budget" sortKey="approved" activeKey={sortKey} dir={sortDir} onToggle={toggle} align="right" className="px-2 py-2 align-middle leading-tight" />
+            <SortableHeader rowSpan={2} label="YTD Actuals" sortKey="ytd" activeKey={sortKey} dir={sortDir} onToggle={toggle} align="right" className="px-2 py-2 align-middle leading-tight" />
+            <SortableHeader rowSpan={2} label="Available Budget" sortKey="available" activeKey={sortKey} dir={sortDir} onToggle={toggle} align="right" className="px-2 py-2 align-middle leading-tight" />
+            <th colSpan={remainingMonths.length + 1} className="px-2 py-2 text-center border-l border-emerald-200">
               Remaining Months Forecast
             </th>
-            <th rowSpan={2} className="break-words px-1.5 py-1 text-right align-bottom">
-              {forecastYear} Total Actual + Forecast
-            </th>
-            <th rowSpan={2} className="break-words px-1.5 py-1 text-right align-bottom">
-              {forecastYear} Remaining Budget
-            </th>
+            <SortableHeader rowSpan={2} label="Total Actual + Forecast" sortKey="totalForecast" activeKey={sortKey} dir={sortDir} onToggle={toggle} align="right" className="px-2 py-2 align-middle leading-tight" />
+            <SortableHeader rowSpan={2} label="Remaining Budget" sortKey="remaining" activeKey={sortKey} dir={sortDir} onToggle={toggle} align="right" className="px-2 py-2 align-middle leading-tight" />
           </tr>
           <tr>
             {remainingMonths.map((m) => (
-              <th key={m} className="break-words px-1.5 py-1 text-right">
+              <th key={m} className="whitespace-nowrap px-2 py-2 text-right align-middle">
                 {MONTH_NAMES[m - 1]}
               </th>
             ))}
-            <th className="break-words px-1.5 py-1 text-right">Total</th>
+            <th className="whitespace-nowrap px-2 py-2 text-right align-middle">Total</th>
+          </tr>
+          <tr className="font-semibold text-[#164b33]">
+            {frozenWidths.map((_w, i) => {
+              const style = { left: frozenLeft[i] };
+              if (i === 0) return <td key={i} className="sticky z-10 truncate bg-[#edf6f1] px-1.5 py-1" style={style}>Total</td>;
+              if (i === frozenWidths.length - 1)
+                return (
+                  <td key={i} className="sticky z-10 truncate bg-[#edf6f1] px-1.5 py-1 text-[10px] font-normal text-emerald-700" style={style} title="Total row figures are shown in thousands of pesos - hover a number for its exact value.">
+                    (figures in PHP &apos;000)
+                  </td>
+                );
+              return <td key={i} className="sticky z-10 truncate bg-[#edf6f1] px-1.5 py-1" style={style}></td>;
+            })}
+            <AmountTd value={totals.approvedBudget2026} thousands />
+            <AmountTd value={totals.ytdActuals2026} thousands />
+            <AmountTd value={totals.availableBudget2026} thousands />
+            {remainingMonths.map((m) => (
+              <AmountTd key={m} value={totals.monthly[m] ?? 0} thousands />
+            ))}
+            <AmountTd value={totals.remainingMonthsForecast} thousands />
+            <AmountTd value={totals.totalActualForecast} thousands />
+            <AmountTd value={totals.remainingBudget2026} thousands />
           </tr>
         </thead>
         <tbody>
-          {consolidated && (
-            <tr className="border-t border-b-2 border-emerald-200 bg-emerald-50/70 font-semibold text-emerald-900">
-              <td className="sticky z-10 truncate bg-emerald-50 px-1.5 py-1" style={{ left: frozenLeft[0] }}>
-                Total
-              </td>
-              <td className="sticky z-10 truncate bg-emerald-50 px-1.5 py-1" style={{ left: frozenLeft[1] }}></td>
-              <td className="sticky z-10 truncate bg-emerald-50 px-1.5 py-1" style={{ left: frozenLeft[2] }}></td>
-              <td className="sticky z-10 truncate bg-emerald-50 px-1.5 py-1 text-[10px] font-normal text-emerald-700" style={{ left: frozenLeft[3] }} title="Total row figures are shown in thousands of pesos - hover a number for its exact value.">
-                (figures in ₱&apos;000)
-              </td>
-              <AmountTd value={totals.approvedBudget2026} thousands />
-              <AmountTd value={totals.ytdActuals2026} thousands />
-              <AmountTd value={totals.availableBudget2026} thousands />
-              {remainingMonths.map((m) => (
-                <AmountTd key={m} value={totals.monthly[m] ?? 0} thousands />
-              ))}
-              <AmountTd value={totals.remainingMonthsForecast} thousands />
-              <AmountTd value={totals.totalActualForecast} thousands />
-              <AmountTd value={totals.remainingBudget2026} thousands />
-            </tr>
-          )}
-          {rows.map((r, i) => {
+          {sorted.map((r, i) => {
             const rowBg = i % 2 === 1 ? "bg-slate-50/60" : "bg-white";
             const stickyBg = i % 2 === 1 ? "bg-slate-50" : "bg-white";
             return (
               <tr key={r.id} className={`border-t border-slate-100 ${rowBg}`}>
                 {consolidated && (
-                  <td className={`sticky z-10 truncate px-1.5 py-0.5 align-top ${stickyBg}`} style={{ left: frozenLeft[0] }} title={r.departmentName}>
+                  <td className={`sticky z-10 truncate px-2 py-1 align-top ${stickyBg}`} style={{ left: frozenLeft[0] }} title={r.departmentName}>
                     {r.departmentName}
                   </td>
                 )}
-                <td className={`sticky z-10 truncate px-1.5 py-0.5 align-top ${stickyBg}`} style={{ left: frozenLeft[consolidated ? 1 : 0] }} title={r.budgetCode ?? undefined}>
+                <td className={`sticky z-10 truncate px-2 py-1 align-top ${stickyBg}`} style={{ left: frozenLeft[consolidated ? 1 : 0] }} title={r.budgetCode ?? undefined}>
                   {r.budgetCode ?? "—"}
                 </td>
-                <td className={`sticky z-10 truncate px-1.5 py-0.5 align-top ${stickyBg}`} style={{ left: frozenLeft[consolidated ? 2 : 1] }} title={r.expenseCategory ?? undefined}>
+                <td className={`sticky z-10 truncate px-2 py-1 align-top ${stickyBg}`} style={{ left: frozenLeft[consolidated ? 2 : 1] }} title={r.expenseCategory ?? undefined}>
                   {r.expenseCategory ?? "—"}
                 </td>
-                <td className={`sticky z-10 truncate px-1.5 py-0.5 align-top ${stickyBg}`} style={{ left: frozenLeft[consolidated ? 3 : 2] }} title={r.glDescription}>
+                <td className={`sticky z-10 truncate px-2 py-1 align-top ${stickyBg}`} style={{ left: frozenLeft[consolidated ? 3 : 2] }} title={r.glDescription}>
                   <button type="button" onClick={() => setDetailRow(r)} className="text-left underline decoration-dotted underline-offset-2 hover:text-emerald-700">
                     {r.glDescription}
                   </button>
@@ -324,7 +374,7 @@ function GaeForecastTable({
                 <AmountTd value={r.availableBudget2026} />
                 {remainingMonths.map((m) =>
                   canEditValues && r.breakdown.length === 1 ? (
-                    <td key={m} className="px-1.5 py-0.5 text-right align-top">
+                    <td key={m} className="px-2 py-1 text-right align-top">
                       <input
                         // Keyed on the row's own current value (not just
                         // m/r.id) - defaultValue only ever applies on mount
@@ -372,6 +422,7 @@ function GaeForecastTable({
         />
       )}
     </div>
+    </>
   );
 }
 
@@ -427,16 +478,16 @@ function ForecastBreakdownModal({
                 <th className="px-2 py-1.5">Budget Code</th>
                 <th className="px-2 py-1.5">CC</th>
                 <th className="px-2 py-1.5">GL</th>
-                <th className="px-2 py-1.5 text-right">{forecastYear} Approved Budget</th>
-                <th className="px-2 py-1.5 text-right">{forecastYear} YTD Actuals</th>
-                <th className="px-2 py-1.5 text-right">{forecastYear} Available Budget</th>
+                <th className="px-2 py-1.5 text-right">Approved Budget</th>
+                <th className="px-2 py-1.5 text-right">YTD Actuals</th>
+                <th className="px-2 py-1.5 text-right">Available Budget</th>
                 {remainingMonths.map((m) => (
                   <th key={m} className="px-2 py-1.5 text-right">
                     {MONTH_NAMES[m - 1]}
                   </th>
                 ))}
-                <th className="px-2 py-1.5 text-right">{forecastYear} Total Actual + Forecast</th>
-                <th className="px-2 py-1.5 text-right">{forecastYear} Remaining Budget</th>
+                <th className="px-2 py-1.5 text-right">Total Actual + Forecast</th>
+                <th className="px-2 py-1.5 text-right">Remaining Budget</th>
               </tr>
             </thead>
             <tbody>
@@ -680,7 +731,7 @@ export function ForecastPage() {
     return (
       <div className="space-y-4">
         <SbuTypeSwitch mode="forecast" current={categoryParam} />
-        <SbuBatchUploadTab category={batchType.category} apiPath={batchType.apiPath} subtitle={`Submit a ${batchType.label} forecast.`} />
+        <SbuBatchUploadTab category={batchType.category} apiPath={batchType.apiPath} subtitle={`Submit a ${batchType.label} forecast.`} forecast />
       </div>
     );
   }
@@ -726,12 +777,28 @@ export function ForecastPage() {
 
   return (
     <div className="space-y-4">
+      <div className="sticky top-0 z-30 -mb-4 space-y-2 bg-slate-100 pb-1 pt-1">
+        {is2026RestrictedToBudgetOfficer && (
+          <div className="text-sm text-slate-500">{forecastYear} Remaining Months Forecast is entered by the Budget Officer only, via Upload Completed Template — the normal per-department process resumes for the next cycle.</div>
+        )}
       <PageHeader
         subtitle={`Months through ${MONTH_NAMES[(fiscalCycle?.asOfMonth2026 ?? asOfMonth) - 1]} are already in Actuals — only remaining months are editable.`}
         actions={
           <div className="flex items-center gap-3">
-            <StatusBadge stage={stage} />
-            {canEditValues && (
+            {isBudgetOfficer && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-slate-600">YTD Actual through</label>
+                <select className="rounded border border-slate-300 bg-white px-2 py-1 text-sm" value={fiscalCycle?.asOfMonth2026 ?? 9} onChange={(e) => asOfMonthMutation.mutate(Number(e.target.value))}>
+                  {MONTH_NAMES.map((name, i) => (
+                    <option key={name} value={i + 1}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {forecastYear !== 2026 && <StatusBadge stage={stage} />}
+            {canEditValues && forecastYear !== 2026 && (
               <button onClick={() => submitMutation.mutate()} disabled={rows.length === 0 || anyIncomplete || submitMutation.isPending} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">
                 Submit for Approval
               </button>
@@ -739,22 +806,23 @@ export function ForecastPage() {
           </div>
         }
       />
+      <div className="grid grid-cols-1 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-2">
+        <div>
+          <label className="block font-medium text-emerald-800">Department</label>
+          <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{isAllMode ? "All Departments" : (eligibleDepts.find((d) => d.id === effectiveDeptId)?.name ?? "—")}</div>
+        </div>
+        <div>
+          <label className="block font-medium text-emerald-800">Forecast Year</label>
+          <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{forecastYear}</div>
+        </div>
+      </div>
+      </div>
       {forecastYear !== 2026 && (
         <p className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-800">Completing this per CC-GL unblocks Centralized First-Level Review (Step 3A). Submission routes to the Centralized Department Head, then the Budget Officer, either of whom can return it.</p>
       )}
 
       {isBudgetOfficer && (
         <div className="flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-slate-600">YTD Actual through</label>
-            <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={fiscalCycle?.asOfMonth2026 ?? 9} onChange={(e) => asOfMonthMutation.mutate(Number(e.target.value))}>
-              {MONTH_NAMES.map((name, i) => (
-                <option key={name} value={i + 1}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
           {/* Note 11 §9 - live-generated, pre-populated version of the same
               template the plain upload below expects (NPC has its own
               distinct shape/page - see NpcForecastView.tsx). Gated to fiscal
@@ -770,7 +838,7 @@ export function ForecastPage() {
               }
               className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
             >
-              Download Template
+              Open Template
             </button>
           )}
           {/* Real SAP pull (FBL3N), replacing the manual upload below for
@@ -902,14 +970,14 @@ export function ForecastPage() {
           if (allModeLoading) return <div className="text-sm text-slate-400">Loading…</div>;
           if (combinedRows.length === 0) return <div className="text-sm text-slate-500">No line items in this category yet.</div>;
           return (
-            <ExpandableSection title="GAE Forecast — All Departments">
+            <ExpandableSection title="GAE Forecast — All Departments" inlineExpand>
               <GaeForecastTable rows={combinedRows} remainingMonths={allModeRemainingMonths} forecastYear={forecastYear} canEditValues={false} onUpdateMonth={() => {}} consolidated />
             </ExpandableSection>
           );
         })()
       ) : (
         <>
-          <ExpandableSection title="GAE Forecast">
+          <ExpandableSection title="GAE Forecast" inlineExpand>
             <GaeForecastTable
               rows={categoryRows}
               remainingMonths={remainingMonths}
@@ -920,9 +988,6 @@ export function ForecastPage() {
           </ExpandableSection>
           {categoryRows.length === 0 && <div className="text-sm text-slate-500">No line items in this category yet.</div>}
 
-          {is2026RestrictedToBudgetOfficer && (
-            <div className="text-sm text-slate-500">{forecastYear} Remaining Months Forecast is entered by the Budget Officer only, via Upload Completed Template — the normal per-department process resumes for the next cycle.</div>
-          )}
           {!is2026RestrictedToBudgetOfficer && !canEditValues && stage !== "APPROVED" && (isOwnDept || isBudgetOfficer) && (
             <div className="text-sm text-slate-500">Waiting on review — editing is locked while a submission is pending.</div>
           )}

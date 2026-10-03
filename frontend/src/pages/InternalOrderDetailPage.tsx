@@ -24,7 +24,7 @@ const STAGE_ROLE: Record<string, string> = {
 const SBU_SCOPED_ROLES = new Set(["BU_FINANCE_HEAD", "BU_HEAD", "BU_FINANCE_OFFICER"]);
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // IO's `sbu` is its own fixed 8-value code (MALLS/OFFICES/.../CORPORATE_ADMIN
@@ -102,7 +102,7 @@ export function InternalOrderDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
         <Field label="Requestor" value={io.requestorName} />
         <Field label="Department" value={io.departmentName} />
         <Field label="Fiscal Year" value={String(io.fiscalYear)} />

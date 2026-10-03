@@ -1,7 +1,9 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
+import { SortableHeader, TableFilter } from "../components/SortableHeader";
+import { useTableSort } from "../lib/useTableSort";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, requestLineDisplay, type AdditionalHeadcountRequest, type BudgetRequest, type DoeBatchDetail, type MobilePhoneBudgetRequest, type Office365AccountRequest, type RevenueBatchSummary } from "../api/client";
+import { api, downloadFile, requestLineDisplay, type AdditionalHeadcountRequest, type BudgetRequest, type DoeBatchDetail, type MobilePhoneBudgetRequest, type Office365AccountRequest, type RevenueBatchSummary } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { PageHeader } from "../components/PageHeader";
 import { SBU_BATCH_TYPES } from "../components/SbuTypeSwitch";
@@ -119,6 +121,39 @@ export function MyRequestsPage() {
 
   const totalCount = displayedBudgetRequests.length + headcountRequests.length + office365Requests.length + mobilePhoneRequests.length + revenueBatches.length + sbuBatchRows.length;
 
+  const [filterText, setFilterText] = useState("");
+  const rowText = (row: TopLevelRow) => {
+    if (row.kind !== "budget") return row.kind;
+    return [REQUEST_CATEGORY_LABELS[row.data.requestCategory] ?? row.data.requestCategory, requestLineDisplay(row.data).name, requestLineDisplay(row.data).budgetCode ?? "", row.data.currentStage].join(" ");
+  };
+  const visibleRows = useMemo(() => {
+    const q = filterText.trim().toLowerCase();
+    return q ? rows.filter((r) => rowText(r).toLowerCase().includes(q)) : rows;
+  }, [rows, filterText]);
+  const getValue = useCallback((row: TopLevelRow, key: string): string | number | null => {
+    if (row.kind !== "budget") return key === "type" ? row.kind : null;
+    const d = row.data;
+    switch (key) {
+      case "type":
+        return REQUEST_CATEGORY_LABELS[d.requestCategory] ?? d.requestCategory;
+      case "item":
+        return requestLineDisplay(d).name;
+      case "budgetCode":
+        return requestLineDisplay(d).budgetCode ?? null;
+      case "proposed":
+        return d.proposedAmount;
+      case "cut":
+        return d.budgetCutAmount;
+      case "approved":
+        return d.proposedAmount - d.budgetCutAmount;
+      case "stage":
+        return d.currentStage;
+      default:
+        return null;
+    }
+  }, []);
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(visibleRows, getValue);
+
   return (
     <div className="space-y-4">
       <PageHeader subtitle={`${totalCount} request(s) submitted`} />
@@ -127,22 +162,24 @@ export function MyRequestsPage() {
       ) : rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-white/60 p-6 text-center text-sm text-slate-400">No requests yet.</div>
       ) : (
+        <>
+        <TableFilter value={filterText} onChange={setFilterText} placeholder="Filter by type, item, budget code, or stage…" count={visibleRows.length} total={rows.length} />
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead className="bg-emerald-50 text-left text-xs tracking-wide text-emerald-800">
               <tr>
-                <th className="px-4 py-2">Type</th>
-                <th className="px-4 py-2">Item</th>
-                <th className="px-4 py-2">Budget Code</th>
-                <th className="px-4 py-2">Proposed Amount</th>
-                <th className="px-4 py-2">Budget Cut</th>
-                <th className="px-4 py-2">Approved Amount</th>
-                <th className="px-4 py-2">Stage</th>
+                <SortableHeader label="Type" sortKey="type" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="px-4 py-2" />
+                <SortableHeader label="Item" sortKey="item" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="px-4 py-2" />
+                <SortableHeader label="Budget Code" sortKey="budgetCode" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="px-4 py-2" />
+                <SortableHeader label="Proposed Amount" sortKey="proposed" activeKey={sortKey} dir={sortDir} onToggle={toggle} align="right" className="px-4 py-2" />
+                <SortableHeader label="Budget Cut" sortKey="cut" activeKey={sortKey} dir={sortDir} onToggle={toggle} align="right" className="px-4 py-2" />
+                <SortableHeader label="Approved Amount" sortKey="approved" activeKey={sortKey} dir={sortDir} onToggle={toggle} align="right" className="px-4 py-2" />
+                <SortableHeader label="Stage" sortKey="stage" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="px-4 py-2" />
                 <th className="px-4 py-2">SAP Doc #</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => (
+              {sorted.map((row, i) => (
                 <Fragment key={row.id}>
                   <tr className={`border-t border-slate-100 ${i % 2 === 1 ? "bg-slate-50/60" : ""}`}>
                     {row.kind === "budget" ? (
@@ -152,16 +189,24 @@ export function MyRequestsPage() {
                           <Link to={`/requests/${row.data.id}`} className="font-medium text-emerald-800 hover:underline">
                             {requestLineDisplay(row.data).name}
                           </Link>
+                          {row.data.bulkUploadBatch && (
+                            <button
+                              onClick={() => downloadFile(`/budget-requests/bulk-upload/${row.data.bulkUploadBatch!.id}/source-file`, row.data.bulkUploadBatch!.sourceFileRef)}
+                              className="block text-xs text-emerald-700 hover:underline"
+                            >
+                              Download source file
+                            </button>
+                          )}
                         </td>
                         <td className="px-4 py-2 text-slate-500">{requestLineDisplay(row.data).budgetCode ?? "—"}</td>
-                        <td className="px-4 py-2 font-medium text-slate-700">₱{row.data.proposedAmount.toLocaleString()}</td>
+                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.proposedAmount.toLocaleString()}</td>
                         {/* Notes_10: "Budget Cut" and "Approved Amount" —
                             only the Budget Officer can set budgetCutAmount
                             (enforced at /budget-requests/:id/budget-cut,
                             requireRole(BUDGET_OFFICER), applied at Step5);
                             this just surfaces what they set, net of it. */}
-                        <td className="px-4 py-2 text-slate-500">{row.data.budgetCutAmount > 0 ? `₱${row.data.budgetCutAmount.toLocaleString()}` : "—"}</td>
-                        <td className="px-4 py-2 font-medium text-emerald-800">₱{(row.data.proposedAmount - row.data.budgetCutAmount).toLocaleString()}</td>
+                        <td className="px-4 py-2 text-slate-500">{row.data.budgetCutAmount > 0 ? `${row.data.budgetCutAmount.toLocaleString()}` : "—"}</td>
+                        <td className="px-4 py-2 font-medium text-emerald-800">{(row.data.proposedAmount - row.data.budgetCutAmount).toLocaleString()}</td>
                         <td className="px-4 py-2">
                           <StatusBadge stage={row.data.currentStage} />
                           <PendingReviewers names={row.data.pendingReviewers} />
@@ -204,7 +249,7 @@ export function MyRequestsPage() {
                             that don't apply, same convention headcount uses
                             above. */}
                         <td className="px-4 py-2 text-slate-400">N/A</td>
-                        <td className="px-4 py-2 font-medium text-slate-700">₱{row.data.totalAmount.toLocaleString()}</td>
+                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.totalAmount.toLocaleString()}</td>
                         <td className="px-4 py-2 text-slate-400">N/A</td>
                         <td className="px-4 py-2 text-slate-400">N/A</td>
                         <td className="px-4 py-2">{REVENUE_STAGE_LABELS[row.data.currentStage] ?? row.data.currentStage}</td>
@@ -223,7 +268,7 @@ export function MyRequestsPage() {
                             this row only exists pre-submit, so N/A for the
                             same reason Revenue's does above. */}
                         <td className="px-4 py-2 text-slate-400">N/A</td>
-                        <td className="px-4 py-2 font-medium text-slate-700">₱{row.data.totalAmount.toLocaleString()}</td>
+                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.totalAmount.toLocaleString()}</td>
                         <td className="px-4 py-2 text-slate-400">N/A</td>
                         <td className="px-4 py-2 text-slate-400">N/A</td>
                         <td className="px-4 py-2">
@@ -278,6 +323,7 @@ export function MyRequestsPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </div>
   );

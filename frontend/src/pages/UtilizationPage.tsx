@@ -86,7 +86,7 @@ interface NpcUtilizationRow {
 }
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 interface SapSyncStatus {

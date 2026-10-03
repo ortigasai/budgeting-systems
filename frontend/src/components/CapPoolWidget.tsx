@@ -15,7 +15,7 @@ interface CapPoolResult {
 }
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // FR-1.6 — Cap / Remaining Pool, recomputed live every time this widget is

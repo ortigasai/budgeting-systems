@@ -10,7 +10,7 @@ import { useFiscalYear } from "../lib/fiscalCycle";
 
 function peso(n: number) {
   const sign = n < 0 ? "-" : "";
-  return `${sign}₱${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${sign}${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // Phase 3 (Budget Transfer & Reallocation, workflow revision) - New

@@ -1,7 +1,7 @@
 import type { ReportTrendPoint } from "../../api/client";
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // Note 12 revision - "5-Year Trend": the fixed 5-point window (current year
@@ -16,7 +16,7 @@ export function TrendTable({ points }: { points: ReportTrendPoint[] }) {
             <th className="px-2 py-1">Fiscal Year</th>
             <th className="px-2 py-1 text-right">Budget</th>
             <th className="px-2 py-1 text-right">Actual</th>
-            <th className="px-2 py-1 text-right">Variance (₱)</th>
+            <th className="px-2 py-1 text-right">Variance (PHP)</th>
             <th className="px-2 py-1 text-right">Variance (%)</th>
           </tr>
         </thead>

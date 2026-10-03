@@ -16,7 +16,7 @@ interface PoolConsumingRequest {
 }
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // The drill-down behind the "Portal Requests" stat tile — the individual

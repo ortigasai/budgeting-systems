@@ -24,7 +24,7 @@ export function ThresholdsTab() {
     <div className="space-y-6">
       <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-2 text-sm font-semibold">
-          Documentation Threshold: <span className="text-emerald-800">₱{(docThreshold?.amount ?? 0).toLocaleString()}</span>
+          Documentation Threshold: <span className="text-emerald-800">{(docThreshold?.amount ?? 0).toLocaleString()}</span>
         </div>
         <p className="mb-2 text-xs text-slate-500">
           Attachments are mandatory once the {targetYear} Proposed Amount exceeds this figure (Field 7).

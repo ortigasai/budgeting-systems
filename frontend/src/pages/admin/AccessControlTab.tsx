@@ -175,7 +175,7 @@ export function AccessControlTab() {
 
         <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200">
           <table className="w-full bg-white text-sm">
-            <thead className="sticky top-0 bg-emerald-50 text-left text-xs tracking-wide text-emerald-800">
+            <thead className="sticky top-0 bg-[#edf6f1] text-left text-xs tracking-wide text-[#164b33]">
               <tr>
                 <th className="px-3 py-2">Name</th>
                 <th className="px-3 py-2">Email</th>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { ApproverPicker } from "../../components/ApproverPicker";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -8,6 +8,7 @@ import { useAuth } from "../../context/AuthContext";
 import { PageHeader } from "../../components/PageHeader";
 import { SectionLabel } from "../../components/TabBar";
 import { useFiscalYear } from "../../lib/fiscalCycle";
+import { startUpload, useUploadTask } from "../../lib/uploadManager";
 
 // Spec item 12: NPC is not the same form as GAE/DOE — its own required
 // fields (SBU, Location, Project Title/Start/End, Amount, Cost Center), no
@@ -39,25 +40,15 @@ export function NpcRequestTab({ subtitle }: { subtitle: string }) {
 
   // Note 11 §6 - "Open Spreadsheet Template", NPC's own shape (Location/
   // Project Title/Dates/Cost Center/Amount) - see routes/bulkUpload.ts's
-  // /npc-template + /npc-template-upload.
-  const [bulkStatus, setBulkStatus] = useState<{ ok: boolean; message: string } | null>(null);
-  const bulkUploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("npcSbu", npcSbu);
-      form.append("fiscalYear", String(FISCAL_YEAR));
-      return (await api.post<{ created: number; errors: { row: number; error: string }[] }>("/npc-template-upload", form)).data;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["my-requests"] });
-      setBulkStatus(
-        data.errors.length === 0
-          ? { ok: true, message: `Created ${data.created} request(s).` }
-          : { ok: data.created > 0, message: `Created ${data.created} request(s), ${data.errors.length} row(s) rejected: ${data.errors.map((e) => `row ${e.row} - ${e.error}`).join("; ")}` }
-      );
-    },
-    onError: (err: any) => setBulkStatus({ ok: false, message: err.response?.data?.error ?? "Upload failed." }),
+  // /npc-template + /npc-template-upload. Runs through the shared
+  // uploadManager (see lib/uploadManager.ts), same as StandardRequestTab.
+  const [uploadTaskId, setUploadTaskId] = useState<string | null>(null);
+  const uploadTask = useUploadTask(uploadTaskId);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [frozenHeaderEl, setFrozenHeaderEl] = useState<HTMLDivElement | null>(null);
+  const [frozenHeaderHeight, setFrozenHeaderHeight] = useState(0);
+  useLayoutEffect(() => {
+    if (frozenHeaderEl) setFrozenHeaderHeight(frozenHeaderEl.offsetHeight);
   });
 
   const createMutation = useMutation({
@@ -128,7 +119,7 @@ export function NpcRequestTab({ subtitle }: { subtitle: string }) {
           <div>
             <span className="font-medium">{FISCAL_YEAR} Amount (VAT exclusive):</span>
             {""}
-            <span className="font-bold text-emerald-800">₱{created.proposedAmount.toLocaleString()}</span>
+            <span className="font-bold text-emerald-800">{created.proposedAmount.toLocaleString()}</span>
           </div>
           <div>
             <span className="font-medium">Attachments:</span>
@@ -150,7 +141,8 @@ export function NpcRequestTab({ subtitle }: { subtitle: string }) {
   const saveDraftDisabled = createMutation.isPending || !npcSbu || !npcLocation || !projectTitle || !projectStartDate || !projectEndDate || !costCenter || !amount;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
+    <div className="mx-auto max-w-6xl space-y-4">
+      <div ref={setFrozenHeaderEl} className="sticky top-0 z-30 space-y-4 bg-slate-100 pb-3 pt-1">
       <PageHeader
         subtitle={subtitle}
         actions={
@@ -159,18 +151,75 @@ export function NpcRequestTab({ subtitle }: { subtitle: string }) {
           </button>
         }
       />
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm">
+        <div>
+          <label className="block font-medium text-emerald-800">Originating Department</label>
+          <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{currentUser?.department?.name}</div>
+        </div>
+        <div>
+          <label className="block font-medium text-emerald-800">Target Calendar Year</label>
+          <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{FISCAL_YEAR}</div>
+        </div>
+      </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+      <div className="space-y-4 lg:col-span-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm">
+        <span className="font-medium text-slate-600">Bulk upload:</span>
+        <button
+          type="button"
+          disabled={!npcSbu}
+          onClick={() =>
+            downloadFile(`/budget-requests/npc-template?npcSbu=${npcSbu}&fiscalYear=${FISCAL_YEAR}`, `npc-request-template-${npcSbu.toLowerCase()}-${FISCAL_YEAR}.xlsx`).catch(() =>
+              setTemplateError("Failed to download the template.")
+            )
+          }
+          className={`rounded-md border px-3 py-1.5 text-xs font-medium ${!npcSbu ? "cursor-not-allowed border-slate-200 text-slate-400" : "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"}`}
+        >
+          Open Template
+        </button>
+        <label className={`rounded-md border px-3 py-1.5 text-xs font-medium ${!npcSbu ? "cursor-not-allowed border-slate-200 text-slate-400" : "cursor-pointer border-slate-300 text-slate-700 hover:bg-slate-100"}`}>
+          {uploadTask?.status === "uploading" ? `Uploading… ${uploadTask.progress}%` : "Upload Completed Template"}
+          <input
+            type="file"
+            accept=".xlsx"
+            className="hidden"
+            disabled={!npcSbu || uploadTask?.status === "uploading"}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              setTemplateError(null);
+              const form = new FormData();
+              form.append("file", file);
+              form.append("npcSbu", npcSbu);
+              form.append("fiscalYear", String(FISCAL_YEAR));
+              setUploadTaskId(startUpload({ label: `NPC bulk upload (${file.name})`, url: "/budget-requests/npc-template-upload", form, invalidateKeys: [["my-requests"]] }));
+            }}
+          />
+        </label>
+        {templateError && <span className="text-xs text-red-600">{templateError}</span>}
+        {uploadTask && uploadTask.status !== "uploading" && (
+          <span className={`text-xs ${uploadTask.status === "success" ? "text-emerald-700" : "text-red-600"}`}>{uploadTask.message}</span>
+        )}
+      </div>
+      {uploadTask?.errors && uploadTask.errors.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+          <div className="mb-1 font-medium">{uploadTask.errors.length} row(s) couldn't be uploaded - fix these in the spreadsheet and re-upload:</div>
+          <ul className="max-h-48 list-disc space-y-0.5 overflow-y-auto pl-4">
+            {uploadTask.errors.map((e, i) => (
+              <li key={i}>
+                <span className="font-medium">Row {e.row}:</span> {e.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <SectionLabel>Project Details</SectionLabel>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className="block font-medium text-slate-600">Originating Department</label>
-            <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-2 py-1.5 text-sm">{currentUser?.department?.name}</div>
-          </div>
-          <div>
-            <label className="block font-medium text-slate-600">Target Calendar Year</label>
-            <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-2 py-1.5 text-sm">{FISCAL_YEAR}</div>
-          </div>
           <div>
             <label className="block text-sm font-medium text-slate-600">
               SBU <span className="text-red-500">*</span>
@@ -250,37 +299,24 @@ export function NpcRequestTab({ subtitle }: { subtitle: string }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm">
-        <span className="font-medium text-slate-600">Bulk upload via spreadsheet:</span>
-        <button
-          type="button"
-          disabled={!npcSbu}
-          onClick={() =>
-            downloadFile(`/budget-requests/npc-template?npcSbu=${npcSbu}&fiscalYear=${FISCAL_YEAR}`, `npc-request-template-${npcSbu.toLowerCase()}-${FISCAL_YEAR}.xlsx`).catch(() =>
-              setBulkStatus({ ok: false, message: "Failed to download the template." })
-            )
-          }
-          className={`rounded-md border px-3 py-1.5 text-xs font-medium ${!npcSbu ? "cursor-not-allowed border-slate-200 text-slate-400" : "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"}`}
-        >
-          Open Spreadsheet Template
-        </button>
-        <label className={`rounded-md border px-3 py-1.5 text-xs font-medium ${!npcSbu ? "cursor-not-allowed border-slate-200 text-slate-400" : "cursor-pointer border-slate-300 text-slate-700 hover:bg-slate-100"}`}>
-          {bulkUploadMutation.isPending ? "Uploading…" : "Upload Completed Template"}
-          <input
-            type="file"
-            accept=".xlsx"
-            className="hidden"
-            disabled={!npcSbu || bulkUploadMutation.isPending}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              setBulkStatus(null);
-              bulkUploadMutation.mutate(file);
-            }}
-          />
-        </label>
-        {bulkStatus && <span className={`text-xs ${bulkStatus.ok ? "text-emerald-700" : "text-red-600"}`}>{bulkStatus.message}</span>}
+
+      </div>
+
+      <div className="space-y-4 lg:col-span-2">
+        <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-sm shadow-sm lg:sticky" style={{ top: frozenHeaderHeight + 16 }}>
+          <SectionLabel>Quick Guide</SectionLabel>
+          <ol className="list-decimal space-y-1.5 pl-5 text-xs text-slate-700">
+            <li>Choose the SBU and Location for the project.</li>
+            <li>Enter the Project Title, Project Start, and Project End dates.</li>
+            <li>Enter the Cost Center and the Amount (VAT exclusive).</li>
+            <li>Pick the Department Head / Approver and the SBU or Division Head.</li>
+            <li>Save Draft to keep working on it later, then submit it for approval.</li>
+          </ol>
+          <div className="border-t border-emerald-200 pt-2 text-xs text-slate-600">
+            <span className="font-medium text-emerald-800">Bulk upload:</span> download the template, add one row per project, then upload it. Any rejected rows are listed here with the reason.
+          </div>
+        </div>
+      </div>
       </div>
 
       {error && <div className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</div>}

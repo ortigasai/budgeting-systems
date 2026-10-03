@@ -24,7 +24,7 @@ import { PeriodGridTable } from "./reports/PeriodGridTable";
 import { TrendTable } from "./reports/TrendTable";
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -332,7 +332,7 @@ export function ReportsPage() {
             </label>
             <span className="text-slate-400">or</span>
             <label className="flex items-center gap-1">
-              <span>₱</span>
+              <span>PHP</span>
               <input
                 type="number"
                 min={0}

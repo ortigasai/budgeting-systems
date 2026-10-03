@@ -22,6 +22,7 @@ export function ApproverPicker({ label, value, onChange, disabled }: { label: st
         value={value}
         onChange={onChange}
         disabled={disabled}
+        hideUntilTyped
       />
     </div>
   );

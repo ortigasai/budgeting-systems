@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
@@ -8,9 +8,10 @@ import { PageHeader } from "../../components/PageHeader";
 import { SectionLabel } from "../../components/TabBar";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useFiscalYear } from "../../lib/fiscalCycle";
+import { startUpload, useUploadTask } from "../../lib/uploadManager";
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // Generalized from DOE's own "Upload Template" form - same shape
@@ -24,9 +25,10 @@ function peso(n: number) {
 // see doeBatches.ts's own comment. That's why there's no Review History
 // section here: by the time a batch leaves DRAFT its rows are independently
 // tracked BudgetRequests, already visible via My Requests/Inbox/Step5.
-export function SbuBatchUploadTab({ category, apiPath, subtitle }: { category: RequestCategory; apiPath: string; subtitle: string }) {
+export function SbuBatchUploadTab({ category, apiPath, subtitle, forecast = false }: { category: RequestCategory; apiPath: string; subtitle: string; forecast?: boolean }) {
   const queryClient = useQueryClient();
-  const { targetYear: FISCAL_YEAR } = useFiscalYear();
+  const { targetYear, forecastYear } = useFiscalYear();
+  const FISCAL_YEAR = forecast ? forecastYear : targetYear;
   const [sbu, setSbu] = useState<Sbu | "">("");
   const { currentUser: authUser, hasRole: authHasRole } = useAuth();
   const mySfSbus = sfSbus(authUser, authHasRole("BUDGET_OFFICER"));
@@ -47,36 +49,43 @@ export function SbuBatchUploadTab({ category, apiPath, subtitle }: { category: R
     enabled: !!activeBatchId,
   });
 
-  const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("sbu", sbu);
-      form.append("companyId", companyId);
-      form.append("fiscalYear", String(FISCAL_YEAR));
-      return (await api.post<DoeBatchDetail>(`/${apiPath}`, form)).data;
-    },
-    onSuccess: (data) => {
-      setActiveBatchId(data.id);
-      setError(null);
-      queryClient.invalidateQueries({ queryKey: [apiPath, "mine"] });
-    },
-    onError: (err: any) => setError(err.response?.data?.error ?? "Failed to upload the template."),
-  });
+  // Both uploads run through the shared uploadManager (see
+  // lib/uploadManager.ts) instead of a local mutation, so progress and the
+  // result toast survive navigating to a different page mid-upload.
+  const [uploadTaskId, setUploadTaskId] = useState<string | null>(null);
+  const uploadTask = useUploadTask(uploadTaskId);
+  function startBatchUpload(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("sbu", sbu);
+    form.append("companyId", companyId);
+    form.append("fiscalYear", String(FISCAL_YEAR));
+    setUploadTaskId(
+      startUpload<DoeBatchDetail>({
+        label: `${category} bulk upload (${file.name})`,
+        url: `/${apiPath}`,
+        form,
+        invalidateKeys: [[apiPath, "mine"]],
+        onDone: (data) => setActiveBatchId(data.id),
+      })
+    );
+  }
 
-  const overrideMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
-      return (await api.post<DoeBatchDetail>(`/${apiPath}/${activeBatchId}/upload`, form)).data;
-    },
-    onSuccess: () => {
-      setError(null);
-      refetchActive();
-      queryClient.invalidateQueries({ queryKey: [apiPath, "mine"] });
-    },
-    onError: (err: any) => setError(err.response?.data?.error ?? "Failed to override the template."),
-  });
+  const [overrideTaskId, setOverrideTaskId] = useState<string | null>(null);
+  const overrideTask = useUploadTask(overrideTaskId);
+  function startOverrideUpload(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    setOverrideTaskId(
+      startUpload<DoeBatchDetail>({
+        label: `${category} override file (${file.name})`,
+        url: `/${apiPath}/${activeBatchId}/upload`,
+        form,
+        invalidateKeys: [[apiPath, "mine"]],
+        onDone: () => refetchActive(),
+      })
+    );
+  }
 
   const submitMutation = useMutation({
     mutationFn: async () => (await api.post<DoeBatchDetail & { submitErrors: { row: string; error: string }[] }>(`/${apiPath}/${activeBatchId}/submit`)).data,
@@ -100,11 +109,30 @@ export function SbuBatchUploadTab({ category, apiPath, subtitle }: { category: R
 
   const canUpload = !!sbu && !!companyId;
   const isDraft = activeBatch?.currentStage === "DRAFT";
+  const [frozenHeaderEl, setFrozenHeaderEl] = useState<HTMLDivElement | null>(null);
+  const [frozenHeaderHeight, setFrozenHeaderHeight] = useState(0);
+  useLayoutEffect(() => {
+    if (frozenHeaderEl) setFrozenHeaderHeight(frozenHeaderEl.offsetHeight);
+  });
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
-      <PageHeader subtitle={subtitle} />
+    <div className="mx-auto max-w-6xl space-y-4">
+      <div ref={setFrozenHeaderEl} className="sticky top-0 z-30 space-y-4 bg-slate-100 pb-3 pt-1">
+        <PageHeader subtitle={subtitle} />
+        <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm">
+          <div>
+            <label className="block font-medium text-emerald-800">Originating Department</label>
+            <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{authUser?.department?.name}</div>
+          </div>
+          <div>
+            <label className="block font-medium text-emerald-800">{forecast ? "Forecast Year" : "Target Calendar Year"}</label>
+            <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{FISCAL_YEAR}</div>
+          </div>
+        </div>
+      </div>
 
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+      <div className="space-y-4 lg:col-span-3">
       {!activeBatch && (
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <SectionLabel>Upload Template</SectionLabel>
@@ -144,20 +172,23 @@ export function SbuBatchUploadTab({ category, apiPath, subtitle }: { category: R
               onClick={() => downloadFile(`/budget-requests/bulk-upload/template?category=${category}&sbu=${sbu}&fiscalYear=${FISCAL_YEAR}`, `budget-request-template-${category.toLowerCase()}-${FISCAL_YEAR}.xlsx`).catch(() => setError("Failed to download the template."))}
               className={`rounded-md border px-4 py-2 text-sm font-medium ${sbu ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" : "cursor-not-allowed border-slate-200 text-slate-400"}`}
             >
-              Download Template (.xlsx)
+              Open Template
             </button>
             <label className={`rounded-md border px-4 py-2 text-sm font-medium ${canUpload ? "cursor-pointer border-slate-300 text-slate-700 hover:bg-slate-100" : "cursor-not-allowed border-slate-200 text-slate-400"}`}>
-              {uploadMutation.isPending ? "Uploading…" : "Upload Completed Template"}
+              {uploadTask?.status === "uploading" ? `Uploading… ${uploadTask.progress}%` : "Upload Completed Template"}
               <input
                 type="file"
                 accept=".xlsx"
                 className="hidden"
-                disabled={!canUpload || uploadMutation.isPending}
-                onChange={(e) => e.target.files?.[0] && uploadMutation.mutate(e.target.files[0])}
+                disabled={!canUpload || uploadTask?.status === "uploading"}
+                onChange={(e) => e.target.files?.[0] && startBatchUpload(e.target.files[0])}
               />
             </label>
           </div>
           {error && <div className="mt-3 rounded bg-red-50 p-2 text-sm text-red-700">{error}</div>}
+          {uploadTask && uploadTask.status !== "uploading" && (
+            <div className={`mt-3 rounded p-2 text-sm ${uploadTask.status === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{uploadTask.message}</div>
+          )}
         </div>
       )}
 
@@ -178,8 +209,8 @@ export function SbuBatchUploadTab({ category, apiPath, subtitle }: { category: R
                 {isDraft && (
                   <>
                     <label className="cursor-pointer rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
-                      {overrideMutation.isPending ? "Uploading…" : "Override File"}
-                      <input type="file" accept=".xlsx" className="hidden" disabled={overrideMutation.isPending} onChange={(e) => e.target.files?.[0] && overrideMutation.mutate(e.target.files[0])} />
+                      {overrideTask?.status === "uploading" ? `Uploading… ${overrideTask.progress}%` : "Override File"}
+                      <input type="file" accept=".xlsx" className="hidden" disabled={overrideTask?.status === "uploading"} onChange={(e) => e.target.files?.[0] && startOverrideUpload(e.target.files[0])} />
                     </label>
                     <button onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending} className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">
                       Submit for Approval
@@ -261,6 +292,21 @@ export function SbuBatchUploadTab({ category, apiPath, subtitle }: { category: R
           </div>
         </div>
       )}
+      </div>
+
+      <div className="space-y-4 lg:col-span-2">
+        <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-sm shadow-sm lg:sticky" style={{ top: frozenHeaderHeight + 16 }}>
+          <SectionLabel>Quick Guide</SectionLabel>
+          <ol className="list-decimal space-y-1.5 pl-5 text-xs text-slate-700">
+            <li>Choose the SBU and the Company.</li>
+            <li>Download the template and fill in one row per Cost Center and GL Account, with the amount for each month.</li>
+            <li>Upload the completed template. Once it's in, the batch shows below.</li>
+            <li>Check the rows, then Submit for Approval. Use Override File to replace the upload while it's still a draft.</li>
+            <li>Any rows that fail validation are listed with the reason.</li>
+          </ol>
+        </div>
+      </div>
+      </div>
     </div>
   );
 }

@@ -22,10 +22,12 @@ import { InternalOrderRequestsPage } from "./pages/InternalOrderRequestsPage";
 import { InternalOrderDetailPage } from "./pages/InternalOrderDetailPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { RequireReportAccess } from "./components/RequireReportAccess";
+import { UploadStatusStack } from "./components/UploadStatusStack";
 
 export default function App() {
   return (
-    <Routes>
+    <>
+      <Routes>
       <Route element={<Layout />}>
         <Route index element={<PhaseMenuPage />} />
         <Route path="phase1" element={<HomePage />} />
@@ -100,6 +102,8 @@ export default function App() {
           }
         />
       </Route>
-    </Routes>
+      </Routes>
+      <UploadStatusStack />
+    </>
   );
 }

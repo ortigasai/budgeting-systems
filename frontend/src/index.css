@@ -2,6 +2,72 @@
 @tailwind components;
 @tailwind utilities;
 
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #94a3b8 transparent;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 150px 0;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+table thead,
+table thead tr,
+table thead td {
+  background-color: #edf6f1;
+}
+
+table thead tr:first-child:not(:last-child) {
+  height: 40px;
+}
+
+table thead tr:nth-child(2):not(:last-child) {
+  height: 28px;
+}
+
+table thead th {
+  background-color: #edf6f1 !important;
+  color: #164b33 !important;
+  font-weight: 600 !important;
+  font-size: 11px !important;
+  line-height: 14px !important;
+  vertical-align: middle !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  border: 0 !important;
+  box-shadow: inset 0 -1px 0 #a7f3d0;
+}
+
+table tbody td {
+  font-variant-numeric: tabular-nums;
+}
+
 body {
   @apply bg-slate-50 text-slate-900;
 }

@@ -19,7 +19,7 @@ interface SalrOption {
 }
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // Spec items 8/9 - requesting the creation of an Internal Order in SAP.

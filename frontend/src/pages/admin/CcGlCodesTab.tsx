@@ -79,7 +79,7 @@ export function CcGlCodesTab() {
           <div className="mb-2 text-sm font-semibold text-slate-700">Cost Centers ({options.costCenters.length})</div>
           <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-emerald-50 text-left text-xs tracking-wide text-emerald-800">
+              <thead className="sticky top-0 bg-[#edf6f1] text-left text-xs tracking-wide text-[#164b33]">
                 <tr>
                   <th className="px-3 py-2">Code</th>
                   <th className="px-3 py-2">Name</th>
@@ -122,7 +122,7 @@ export function CcGlCodesTab() {
           <div className="mb-2 text-sm font-semibold text-slate-700">GL Accounts ({options.glAccounts.length})</div>
           <div className="max-h-96 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-emerald-50 text-left text-xs tracking-wide text-emerald-800">
+              <thead className="sticky top-0 bg-[#edf6f1] text-left text-xs tracking-wide text-[#164b33]">
                 <tr>
                   <th className="px-3 py-2">Code</th>
                   <th className="px-3 py-2">Name</th>

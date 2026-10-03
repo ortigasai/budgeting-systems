@@ -21,7 +21,7 @@ interface DashFlowTicketOut {
 }
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // Note 11 §5 - "Dash Flow Payment Request Ticket – Budget Check". Served by

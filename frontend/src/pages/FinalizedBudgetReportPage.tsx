@@ -6,7 +6,7 @@ import { SectionLabel } from "../components/TabBar";
 import { useFiscalYear } from "../lib/fiscalCycle";
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 const CATEGORY_OPTIONS: { value: RequestCategory; label: string }[] = [

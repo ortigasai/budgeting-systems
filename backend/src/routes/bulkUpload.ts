@@ -1,6 +1,9 @@
 import { Router } from "express";
 import ExcelJS from "exceljs";
 import multer from "multer";
+import path from "node:path";
+import fs from "node:fs";
+import crypto from "node:crypto";
 import { Prisma, RequestCategory, Sbu } from "@prisma/client";
 import { prisma } from "../prisma";
 import { asyncHandler } from "../asyncHandler";
@@ -14,10 +17,28 @@ import { sbuBatchCategoryLabel } from "../lib/sbuBatchCategories";
 import { fetchCcGlOptions } from "../lib/pyBackendClient";
 import { NPC_LOCATION_VALUES, NPC_SBU_VALUES, npcSbuBudgetCodePrefix, type NpcLocation, type NpcSbu } from "../lib/npcSbu";
 import { EXPENSE_REQUEST_TEMPLATE_HEADER, parseExpenseRequestSheet, visibleLineItemsForRequest } from "../lib/expenseRequestTemplate";
+import { assertCanAccessBulkUploadBatch } from "../lib/bulkUploadAccess";
 
 export const bulkUploadRouter = Router();
 
 bulkUploadRouter.use(requireAuth);
+
+// Same uploads directory/convention doeBatches.ts and revenueBatches.ts
+// already persist their source files under - one shared location for every
+// uploaded-template's original bytes, regardless of which route created it.
+const uploadDir = path.resolve(process.env.UPLOAD_DIR ?? "./uploads");
+fs.mkdirSync(uploadDir, { recursive: true });
+
+// 1-indexed column number -> Excel column letters (1 -> "A", 27 -> "AA").
+function columnLetter(n: number): string {
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
 
 const HEADER = EXPENSE_REQUEST_TEMPLATE_HEADER;
 
@@ -104,12 +125,71 @@ bulkUploadRouter.get(
     if (!departmentId) throw new HttpError(400, "Your account has no assigned department.");
 
     const items = await visibleLineItemsForRequest(departmentId);
+    const categories = [...new Set(items.map((i) => i.category))].sort((a, b) => a.localeCompare(b));
+    const itemsByCategory = new Map<string, typeof items>();
+    for (const item of items) {
+      const list = itemsByCategory.get(item.category) ?? [];
+      list.push(item);
+      itemsByCategory.set(item.category, list);
+    }
 
     const workbook = new ExcelJS.Workbook();
+
+    // Hidden list sources for the dropdowns below. Column A/B are the flat
+    // category list and full item list (category dropdown, and the Expense
+    // Line Item dropdown's fallback before a category is picked). Column C
+    // pairs each category with an opaque named-range name ("cat_0", "cat_1",
+    // ...) - real category text contains characters Excel defined names
+    // can't (&, commas, parentheses), so rather than derive a range name
+    // from the text itself, each category gets one of these columns D
+    // onward holding just its own items, named via that opaque id, and the
+    // Expense Line Item dropdown looks the id up through column C instead
+    // of needing to sanitize the category text in a formula.
     const refSheet = workbook.addWorksheet("Reference", { state: "veryHidden" });
-    items.forEach((item, i) => {
-      refSheet.getCell(i + 1, 1).value = item.name;
+    categories.forEach((c, i) => {
+      refSheet.getCell(i + 1, 1).value = c;
     });
+    items.forEach((item, i) => {
+      refSheet.getCell(i + 1, 2).value = item.name;
+    });
+    categories.forEach((c, i) => {
+      const rangeName = `cat_${i}`;
+      refSheet.getCell(i + 1, 3).value = rangeName;
+      const categoryItems = itemsByCategory.get(c) ?? [];
+      const col = 4 + i;
+      categoryItems.forEach((item, r) => {
+        refSheet.getCell(r + 1, col).value = item.name;
+      });
+      if (categoryItems.length > 0) {
+        const colLetter = columnLetter(col);
+        workbook.definedNames.add(`Reference!$${colLetter}$1:$${colLetter}$${categoryItems.length}`, rangeName);
+      }
+    });
+    // One extra lookup-table row, keyed on a blank Expense Category, so the
+    // Expense Line Item dropdown falls back to the full catalog before a
+    // category is picked - via the same plain VLOOKUP every other row uses,
+    // not an IFERROR wrapper. Excel's data validation list evaluator doesn't
+    // reliably support IFERROR(INDIRECT(...)) (it was silently always
+    // falling through to the fallback, defeating the per-category filter
+    // entirely) - a genuine lookup row sidesteps that rather than working
+    // around it.
+    const blankKeyRow = categories.length + 1;
+    refSheet.getCell(blankKeyRow, 3).value = `Reference!$B$1:$B$${items.length}`;
+
+    // Visible, read-only lookup so whoever fills the sheet can see which
+    // Expense Line Items belong to which Expense Category, and what each
+    // one's Other Required Fields actually are, without leaving Excel or
+    // guessing at the JSON shape the upload expects.
+    const catalogSheet = workbook.addWorksheet("Catalog Reference");
+    catalogSheet.addRow(["Expense Category", "Expense Line Item", "Required Fields (fill into \"Other Required Fields (JSON)\")"]);
+    catalogSheet.getRow(1).font = { bold: true };
+    for (const item of items) {
+      const extraFieldsConfig = (item.extraFieldsConfig as { label: string; required: boolean }[] | null) ?? [];
+      const requiredLabels = extraFieldsConfig.filter((f) => f.required).map((f) => f.label);
+      catalogSheet.addRow([item.category, item.name, requiredLabels.length > 0 ? requiredLabels.join(", ") : "—"]);
+    }
+    catalogSheet.columns = [{ width: 28 }, { width: 36 }, { width: 50 }];
+    catalogSheet.autoFilter = { from: "A1", to: `C${items.length + 1}` };
 
     const sheet = workbook.addWorksheet(`Budget Requests ${fiscalYear}`.slice(0, 31));
     sheet.addRow(HEADER);
@@ -119,7 +199,26 @@ bulkUploadRouter.get(
       sheet.getCell(`A${row}`).dataValidation = {
         type: "list",
         allowBlank: true,
-        formulae: [`Reference!$A$1:$A$${items.length}`],
+        formulae: [`Reference!$A$1:$A$${categories.length}`],
+        showErrorMessage: true,
+        errorStyle: "stop",
+        errorTitle: "Invalid Expense Category",
+        error: "Pick a category from the dropdown list - see the Catalog Reference sheet for the full list.",
+      };
+      sheet.getCell(`B${row}`).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        // Filters to the chosen row's Expense Category via the lookup table
+        // in Reference!A:C (category text -> either a "cat_N" range name
+        // for that category's own items, or - for row blankKeyRow, keyed on
+        // a blank category - the full item range as a literal address, same
+        // fallback as before cascading existed, before a category is
+        // picked).
+        formulae: [`INDIRECT(VLOOKUP($A${row},Reference!$A$1:$C$${blankKeyRow},3,FALSE))`],
+        showErrorMessage: true,
+        errorStyle: "stop",
+        errorTitle: "Invalid Expense Line Item",
+        error: "Pick a line item from the dropdown list for the chosen Expense Category - see the Catalog Reference sheet for the full list.",
       };
     }
 
@@ -134,6 +233,30 @@ bulkUploadRouter.get(
     res.setHeader("Content-Disposition", `attachment; filename="budget-request-template-${category.toLowerCase()}-${fiscalYear}.xlsx"`);
     await workbook.xlsx.write(res);
     res.end();
+  })
+);
+
+// Lets a reviewer download exactly what a Requestor originally uploaded,
+// for any of the four bulk-upload flows that persist a batch (GAE/DOE, NPC,
+// and - via their own routers - the SBU-batch categories and Revenue, which
+// already wrote sourceFileRef as a real on-disk filename before this route
+// existed). Batches created before file persistence was added have no real
+// file on disk - sourceFileRef is just their original display name - so
+// this 404s cleanly for those rather than erroring.
+bulkUploadRouter.get(
+  "/bulk-upload/:batchId/source-file",
+  asyncHandler(async (req, res) => {
+    const batch = await prisma.bulkUploadBatch.findUniqueOrThrow({ where: { id: req.params.batchId } });
+    await assertCanAccessBulkUploadBatch(req.user!, batch);
+
+    const filePath = path.join(uploadDir, batch.sourceFileRef);
+    if (!fs.existsSync(filePath)) {
+      throw new HttpError(404, "The original uploaded file isn't available for this upload.");
+    }
+    // Strip the crypto.randomUUID()-prefix back off so the downloaded file
+    // is named the same as what the Requestor originally uploaded.
+    const displayName = batch.sourceFileRef.replace(/^[0-9a-f-]{36}-/, "");
+    res.download(filePath, displayName);
   })
 );
 
@@ -166,18 +289,27 @@ bulkUploadRouter.post(
     // exceljs's bundled Buffer type predates the current @types/node Buffer
     // generic; the value itself is a plain Node Buffer at runtime.
     await workbook.xlsx.load(req.file.buffer as unknown as ArrayBuffer);
-    const sheet = workbook.worksheets.find((w) => w.state !== "veryHidden");
+    // "Catalog Reference" is a visible read-only lookup sheet that sits
+    // before the real data sheet in the template - excluded by name so it's
+    // never mistaken for the one the user actually filled in.
+    const sheet = workbook.worksheets.find((w) => w.state !== "veryHidden" && w.name !== "Catalog Reference");
     if (!sheet) throw new HttpError(400, "No usable worksheet found in the uploaded file.");
 
     const standardItems = await visibleLineItemsForRequest(departmentId);
     const itemsByName = new Map(standardItems.map((i) => [i.name.trim().toLowerCase(), i]));
+
+    // Persist the original upload (parsing above already reads it from the
+    // in-memory buffer) so a reviewer can download exactly what was
+    // submitted later - see the /bulk-upload/:batchId/source-file route.
+    const sourceFileName = `${crypto.randomUUID()}-${req.file.originalname}`;
+    fs.writeFileSync(path.join(uploadDir, sourceFileName), req.file.buffer);
 
     const batch = await prisma.bulkUploadBatch.create({
       data: {
         uploadedById: req.user!.id,
         departmentId,
         fiscalYear,
-        sourceFileRef: req.file.originalname,
+        sourceFileRef: sourceFileName,
         rowCount: 0,
         status: "PROCESSING",
       },
@@ -310,12 +442,15 @@ bulkUploadRouter.post(
     const sheet = workbook.worksheets.find((w) => w.state !== "veryHidden");
     if (!sheet) throw new HttpError(400, "No usable worksheet found in the uploaded file.");
 
+    const sourceFileName = `${crypto.randomUUID()}-${req.file.originalname}`;
+    fs.writeFileSync(path.join(uploadDir, sourceFileName), req.file.buffer);
+
     const batch = await prisma.bulkUploadBatch.create({
       data: {
         uploadedById: req.user!.id,
         departmentId,
         fiscalYear,
-        sourceFileRef: req.file.originalname,
+        sourceFileRef: sourceFileName,
         rowCount: 0,
         status: "PROCESSING",
       },

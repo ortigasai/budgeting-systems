@@ -92,7 +92,7 @@ interface DashboardSummaryResponse {
 }
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 function pct(n: number) {
   return `${(n * 100).toFixed(1)}%`;

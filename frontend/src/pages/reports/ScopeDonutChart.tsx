@@ -10,7 +10,7 @@ const SCOPE_COLORS: Record<FinancialScope, string> = { OPEX: "#2a78d6", REVENUE:
 const SCOPE_LABELS: Record<FinancialScope, string> = { OPEX: "Operating Expense", REVENUE: "Revenue", NPC: "Non-Project Capex" };
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // Note 12's "Scope Breakdown Chart" - OpEx/Revenue/NPC split, computed

@@ -35,7 +35,7 @@ export function HeadcountRequestDetailPage() {
         <StatusBadge stage={request.currentStage} />
       </div>
 
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
         <Field label="Reference Code" value={request.code} accent />
         <Field label="Originating Department" value={request.department.name} />
         <Field label="Company" value={request.company.code} />

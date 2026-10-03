@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { ApproverPicker } from "../../components/ApproverPicker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -9,6 +9,7 @@ import { SearchableSelect } from "../../components/SearchableSelect";
 import { SectionLabel } from "../../components/TabBar";
 import { evaluateSpendGridFormula, spreadByFrequency, spreadByMonthNumbers } from "../../lib/spendGridFormula";
 import { useFiscalYear } from "../../lib/fiscalCycle";
+import { startUpload, useUploadTask } from "../../lib/uploadManager";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -147,24 +148,18 @@ export function StandardRequestTab({ requestCategory, subtitle }: { requestCateg
   // Note 11 §6 - "Open Spreadsheet Template": a bulk alternative to the
   // manual form above for requestors who'd rather fill many line items at
   // once. Reuses the existing bulk-upload flow (see routes/bulkUpload.ts).
-  const [bulkStatus, setBulkStatus] = useState<{ ok: boolean; message: string } | null>(null);
-  const bulkUploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("category", requestCategory);
-      form.append("fiscalYear", String(FISCAL_YEAR));
-      return (await api.post<{ created: number; errors: { row: number; error: string }[] }>("/bulk-upload", form)).data;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["my-requests"] });
-      setBulkStatus(
-        data.errors.length === 0
-          ? { ok: true, message: `Created ${data.created} request(s).` }
-          : { ok: data.created > 0, message: `Created ${data.created} request(s), ${data.errors.length} row(s) rejected: ${data.errors.map((e) => `row ${e.row} - ${e.error}`).join("; ")}` }
-      );
-    },
-    onError: (err: any) => setBulkStatus({ ok: false, message: err.response?.data?.error ?? "Upload failed." }),
+  // The upload itself runs through the shared uploadManager (see
+  // lib/uploadManager.ts) instead of a local mutation, so progress and the
+  // result toast survive navigating to a different page mid-upload - this
+  // tab just keeps the task id to show the same status inline while it's
+  // still mounted.
+  const [uploadTaskId, setUploadTaskId] = useState<string | null>(null);
+  const uploadTask = useUploadTask(uploadTaskId);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [frozenHeaderEl, setFrozenHeaderEl] = useState<HTMLDivElement | null>(null);
+  const [frozenHeaderHeight, setFrozenHeaderHeight] = useState(0);
+  useLayoutEffect(() => {
+    if (frozenHeaderEl) setFrozenHeaderHeight(frozenHeaderEl.offsetHeight);
   });
   // Notes_8: "amount should be in 'Accounting' format, e.g., 1000 should be
   // reflected as 1,000." The box being actively typed into shows the raw
@@ -378,7 +373,7 @@ export function StandardRequestTab({ requestCategory, subtitle }: { requestCateg
           <div>
             <span className="font-medium">{FISCAL_YEAR} Proposed Amount:</span>
             {""}
-            <span className="font-bold text-emerald-800">₱{created.proposedAmount.toLocaleString()}</span>
+            <span className="font-bold text-emerald-800">{created.proposedAmount.toLocaleString()}</span>
           </div>
           <div>
             <span className="font-medium">Attachments:</span>
@@ -401,6 +396,7 @@ export function StandardRequestTab({ requestCategory, subtitle }: { requestCateg
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
+      <div ref={setFrozenHeaderEl} className="sticky top-0 z-30 space-y-4 bg-slate-100 pb-3 pt-1">
       <PageHeader
         subtitle={subtitle}
         actions={
@@ -409,50 +405,74 @@ export function StandardRequestTab({ requestCategory, subtitle }: { requestCateg
           </button>
         }
       />
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm">
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm">
         <div>
-          <label className="block font-medium text-slate-600">Originating Department</label>
-          <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-2 py-1.5">{currentUser?.department?.name}</div>
+          <label className="block font-medium text-emerald-800">Originating Department</label>
+          <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{currentUser?.department?.name}</div>
         </div>
         <div>
-          <label className="block font-medium text-slate-600">Target Calendar Year</label>
-          <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-2 py-1.5">{FISCAL_YEAR}</div>
+          <label className="block font-medium text-emerald-800">Target Calendar Year</label>
+          <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{FISCAL_YEAR}</div>
         </div>
       </div>
+      </div>
 
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+      <div className="space-y-4 lg:col-span-3">
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm">
-        <span className="font-medium text-slate-600">Bulk upload via spreadsheet:</span>
+        <span className="font-medium text-slate-600">Bulk upload:</span>
         <button
           type="button"
           onClick={() =>
             downloadFile(`/budget-requests/bulk-upload/template?category=${requestCategory}&fiscalYear=${FISCAL_YEAR}`, `budget-request-template-${requestCategory.toLowerCase()}-${FISCAL_YEAR}.xlsx`).catch(() =>
-              setBulkStatus({ ok: false, message: "Failed to download the template." })
+              setTemplateError("Failed to download the template.")
             )
           }
           className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
         >
-          Open Spreadsheet Template
+          Open Template
         </button>
         <label className="cursor-pointer rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
-          {bulkUploadMutation.isPending ? "Uploading…" : "Upload Completed Template"}
+          {uploadTask?.status === "uploading" ? `Uploading… ${uploadTask.progress}%` : "Upload Completed Template"}
           <input
             type="file"
             accept=".xlsx"
             className="hidden"
-            disabled={bulkUploadMutation.isPending}
+            disabled={uploadTask?.status === "uploading"}
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = "";
               if (!file) return;
-              setBulkStatus(null);
-              bulkUploadMutation.mutate(file);
+              setTemplateError(null);
+              const form = new FormData();
+              form.append("file", file);
+              form.append("category", requestCategory);
+              form.append("fiscalYear", String(FISCAL_YEAR));
+              setUploadTaskId(startUpload({ label: `${requestCategory} bulk upload (${file.name})`, url: "/budget-requests/bulk-upload", form, invalidateKeys: [["my-requests"]] }));
             }}
           />
         </label>
-        {bulkStatus && <span className={`text-xs ${bulkStatus.ok ? "text-emerald-700" : "text-red-600"}`}>{bulkStatus.message}</span>}
+        {templateError && <span className="text-xs text-red-600">{templateError}</span>}
+        {uploadTask && uploadTask.status !== "uploading" && (
+          <span className={`text-xs ${uploadTask.status === "success" ? "text-emerald-700" : "text-red-600"}`}>{uploadTask.message}</span>
+        )}
+      </div>
+      {uploadTask?.errors && uploadTask.errors.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+          <div className="mb-1 font-medium">{uploadTask.errors.length} row(s) couldn't be uploaded - fix these in the spreadsheet and re-upload:</div>
+          <ul className="max-h-48 list-disc space-y-0.5 overflow-y-auto pl-4">
+            {uploadTask.errors.map((e, i) => (
+              <li key={i}>
+                <span className="font-medium">Row {e.row}:</span> {e.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5 lg:items-start">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
         <div className="space-y-4 lg:col-span-3">
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <SectionLabel>Expense Selection</SectionLabel>
@@ -626,13 +646,131 @@ export function StandardRequestTab({ requestCategory, subtitle }: { requestCateg
             <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm">
               <span className="font-medium text-emerald-800">{FISCAL_YEAR} Proposed Amount:</span>
               {""}
-              <span className="font-bold text-emerald-800">₱{proposedAmount.toLocaleString()}</span>
-              {needsAttachment && <span className="ml-2 text-amber-700">(exceeds ₱{docThreshold!.amount.toLocaleString()} — attachment will be required)</span>}
+              <span className="font-bold text-emerald-800">{proposedAmount.toLocaleString()}</span>
+              {needsAttachment && <span className="ml-2 text-amber-700">(exceeds {docThreshold!.amount.toLocaleString()} — attachment will be required)</span>}
             </div>
+          </div>
+
+          {selectedItem && !usesHeadcountTable && selectedItem.extraFieldsConfig.length > 0 && (
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <SectionLabel>Additional Fields</SectionLabel>
+              {selectedItem.extraFieldsConfig.map((field) => {
+                if (field.label === "Employee Name") {
+                  return (
+                    <div key={field.label}>
+                      <label className="block text-sm font-medium text-slate-600">
+                        {field.label} {field.required && <span className="text-red-500">*</span>}
+                      </label>
+                      <SearchableSelect
+                        placeholder="Search employees…"
+                        options={employees.map((u) => ({ value: u.name, label: u.name, sublabel: u.department ?? undefined }))}
+                        value={otherFields[field.label] ?? ""}
+                        onChange={(v) => {
+                          const emp = employees.find((u) => u.name === v);
+                          setOtherFields({ ...otherFields, "Employee Name": v, Department: emp?.department ?? "" });
+                        }}
+                      />
+                    </div>
+                  );
+                }
+                // Department is derived from whichever employee is picked above
+                // rather than chosen independently, so it can't be mismatched -
+                // shown read-only here.
+                if (field.label === "Department" && selectedItem.extraFieldsConfig.some((f) => f.label === "Employee Name")) {
+                  return (
+                    <div key={field.label}>
+                      <label className="block text-sm font-medium text-slate-600">
+                        {field.label} {field.required && <span className="text-red-500">*</span>}
+                      </label>
+                      <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-2 py-1.5 text-sm text-slate-600">{otherFields[field.label] || "— Select an employee above —"}</div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={field.label}>
+                    <label className="block text-sm font-medium text-slate-600">
+                      {field.label} {field.required && <span className="text-red-500">*</span>}
+                    </label>
+                    {field.type === "DROPDOWN" && field.multi ? (
+                      // Multiple months can be selected for one field.
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {field.options?.map((opt) => {
+                          const selected = (otherFields[field.label] ?? "")
+                            .split(",")
+                            .map((s) => s.trim())
+                            .filter(Boolean);
+                          const checked = selected.includes(opt.label);
+                          return (
+                            <label key={opt.label} className={`cursor-pointer rounded border px-2 py-1 text-xs ${checked ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-slate-300 text-slate-600"}`}>
+                              <input
+                                type="checkbox"
+                                className="mr-1"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const next = e.target.checked ? [...selected, opt.label] : selected.filter((s) => s !== opt.label);
+                                  setOtherFields({ ...otherFields, [field.label]: next.join(",") });
+                                }}
+                              />
+                              {opt.label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : field.type === "DROPDOWN" ? (
+                      <select className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm" value={otherFields[field.label] ?? ""} onChange={(e) => setOtherFields({ ...otherFields, [field.label]: e.target.value })}>
+                        <option value="">— Select —</option>
+                        {field.options?.map((opt) => (
+                          <option key={opt.label} value={opt.label}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input type={field.type === "NUMBER" ? "number" : "text"} className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm" value={otherFields[field.label] ?? ""} onChange={(e) => setOtherFields({ ...otherFields, [field.label]: e.target.value })} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <SectionLabel>Business Justification</SectionLabel>
+            <textarea className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" rows={3} value={businessJustification} onChange={(e) => setBusinessJustification(e.target.value)} />
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <SectionLabel>Approval</SectionLabel>
+            {ownDeptInitiated ? (
+              <div className="space-y-2">
+                <div className="text-sm text-slate-500">This is your own centralized department's expense, so there's no Department Head to pick - instead, assign it directly to your Centralized Department Head.</div>
+                <div className="max-w-md">
+                  <ApproverPicker label="Centralized Department Head" value={centralizedHeadId} onChange={setCentralizedHeadId} />
+                </div>
+              </div>
+            ) : (
+              <div className="max-w-md">
+                <ApproverPicker label="Department Head / Approver" value={departmentHeadId} onChange={setDepartmentHeadId} />
+              </div>
+            )}
           </div>
         </div>
 
         <div className="space-y-4 lg:col-span-2">
+          <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-sm shadow-sm lg:sticky" style={{ top: frozenHeaderHeight + 16 }}>
+            <SectionLabel>Quick Guide</SectionLabel>
+            <ol className="list-decimal space-y-1.5 pl-5 text-xs text-slate-700">
+              <li>Choose an Expense Category, then an Expense Line Item. Tick "This expense isn't in the standard list" for anything custom.</li>
+              <li>Enter the amount for each month, or use "Fill all months" to apply one amount to all twelve.</li>
+              <li>Fill in any Additional Fields marked as required.</li>
+              <li>Pick the Department Head / Approver and write a Business Justification.</li>
+              <li>Save Draft to keep working on it later, then submit it for approval.</li>
+              <li>If the amount is over the threshold shown under Proposed Amount, attach the supporting document before submitting.</li>
+            </ol>
+            <div className="border-t border-emerald-200 pt-2 text-xs text-slate-600">
+              <span className="font-medium text-emerald-800">Bulk upload:</span> download the template, add one row per line item, then upload it. Any rejected rows are listed here with the reason.
+            </div>
+          </div>
           {selectedItem && usesHeadcountTable && rateField && (
             <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <SectionLabel>Headcount &amp; Rate</SectionLabel>
@@ -709,116 +847,10 @@ export function StandardRequestTab({ requestCategory, subtitle }: { requestCateg
               </button>
             </div>
           )}
-          {/* Notes_8: "Move up 'Additional Fields' above Business Justification." */}
-          {selectedItem && !usesHeadcountTable && selectedItem.extraFieldsConfig.length > 0 && (
-            <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <SectionLabel>Additional Fields</SectionLabel>
-              {selectedItem.extraFieldsConfig.map((field) => {
-                if (field.label === "Employee Name") {
-                  return (
-                    <div key={field.label}>
-                      <label className="block text-sm font-medium text-slate-600">
-                        {field.label} {field.required && <span className="text-red-500">*</span>}
-                      </label>
-                      <SearchableSelect
-                        placeholder="Search employees…"
-                        options={employees.map((u) => ({ value: u.name, label: u.name, sublabel: u.department ?? undefined }))}
-                        value={otherFields[field.label] ?? ""}
-                        onChange={(v) => {
-                          const emp = employees.find((u) => u.name === v);
-                          setOtherFields({ ...otherFields, "Employee Name": v, Department: emp?.department ?? "" });
-                        }}
-                      />
-                    </div>
-                  );
-                }
-                // Notes_8: "Employee Name, Department (dropdown list from ...
-                // column J)." Department is derived from whichever employee is
-                // picked above rather than chosen independently, so it can't be
-                // mismatched — shown read-only here.
-                if (field.label === "Department" && selectedItem.extraFieldsConfig.some((f) => f.label === "Employee Name")) {
-                  return (
-                    <div key={field.label}>
-                      <label className="block text-sm font-medium text-slate-600">
-                        {field.label} {field.required && <span className="text-red-500">*</span>}
-                      </label>
-                      <div className="mt-1 rounded border border-slate-200 bg-slate-100 px-2 py-1.5 text-sm text-slate-600">{otherFields[field.label] || "— Select an employee above —"}</div>
-                    </div>
-                  );
-                }
-                return (
-                  <div key={field.label}>
-                    <label className="block text-sm font-medium text-slate-600">
-                      {field.label} {field.required && <span className="text-red-500">*</span>}
-                    </label>
-                    {field.type === "DROPDOWN" && field.multi ? (
-                      // Notes_8: "Those expense where users to select which month
-                      // to spend – allow selection of multiple months."
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        {field.options?.map((opt) => {
-                          const selected = (otherFields[field.label] ?? "")
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean);
-                          const checked = selected.includes(opt.label);
-                          return (
-                            <label key={opt.label} className={`cursor-pointer rounded border px-2 py-1 text-xs ${checked ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-slate-300 text-slate-600"}`}>
-                              <input
-                                type="checkbox"
-                                className="mr-1"
-                                checked={checked}
-                                onChange={(e) => {
-                                  const next = e.target.checked ? [...selected, opt.label] : selected.filter((s) => s !== opt.label);
-                                  setOtherFields({ ...otherFields, [field.label]: next.join(",") });
-                                }}
-                              />
-                              {opt.label}
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ) : field.type === "DROPDOWN" ? (
-                      <select className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm" value={otherFields[field.label] ?? ""} onChange={(e) => setOtherFields({ ...otherFields, [field.label]: e.target.value })}>
-                        <option value="">— Select —</option>
-                        {field.options?.map((opt) => (
-                          <option key={opt.label} value={opt.label}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input type={field.type === "NUMBER" ? "number" : "text"} className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm" value={otherFields[field.label] ?? ""} onChange={(e) => setOtherFields({ ...otherFields, [field.label]: e.target.value })} />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <SectionLabel>Approval</SectionLabel>
-            {ownDeptInitiated ? (
-              <div className="space-y-2">
-                <div className="text-sm text-slate-500">This is your own centralized department's expense, so there's no Department Head to pick - instead, assign it directly to your Centralized Department Head.</div>
-                <div className="max-w-md">
-                  <ApproverPicker label="Centralized Department Head" value={centralizedHeadId} onChange={setCentralizedHeadId} />
-                </div>
-              </div>
-            ) : (
-              <div className="max-w-md">
-                <ApproverPicker label="Department Head / Approver" value={departmentHeadId} onChange={setDepartmentHeadId} />
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <SectionLabel>Business Justification</SectionLabel>
-            <textarea className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" rows={3} value={businessJustification} onChange={(e) => setBusinessJustification(e.target.value)} />
-          </div>
         </div>
       </div>
 
-      {error && <div className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</div>}
+      {error &&<div className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</div>}
     </div>
   );
 }

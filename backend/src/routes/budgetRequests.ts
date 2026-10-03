@@ -45,6 +45,9 @@ const DETAIL_INCLUDE = {
   attachments: true,
   reviewDecisions: { include: { decidedBy: true }, orderBy: { timestamp: "asc" as const } },
   createdBy: true,
+  // Lets a bulk-uploaded request's card offer "Download source file" without
+  // an extra round trip - see bulkUpload.ts's new source-file route.
+  bulkUploadBatch: { select: { id: true, sourceFileRef: true } },
 } satisfies Prisma.BudgetRequestInclude;
 
 // ---- Create (Step 1) ----
@@ -482,6 +485,31 @@ budgetRequestsRouter.post(
       .object({ decision: z.enum(["APPROVE", "RETURN_PREVIOUS", "RETURN_REQUESTOR"]), comment: z.string().optional() })
       .parse(req.body);
     res.json(await decideRequest(req.params.id, req.user!, decision, comment));
+  })
+);
+
+// Inbox's "Approve Selected" - same single-request decideRequest as above,
+// called once per id, sequentially (an admin action, not a high-throughput
+// path - not worth the complexity of parallelizing writes that could race
+// each other). Every per-item check decideRequest already enforces (role
+// assignment, due dates, the GAE forecast-completeness gate, the
+// Budget-Officer-stage block) still runs for each one - a failing item is
+// reported, never silently skipped or force-approved.
+budgetRequestsRouter.post(
+  "/bulk-decision",
+  asyncHandler(async (req, res) => {
+    const { ids, comment } = z.object({ ids: z.array(z.string().min(1)).min(1), comment: z.string().optional() }).parse(req.body);
+    const succeeded: string[] = [];
+    const failed: { id: string; error: string }[] = [];
+    for (const id of ids) {
+      try {
+        await decideRequest(id, req.user!, "APPROVE", comment);
+        succeeded.push(id);
+      } catch (err) {
+        failed.push({ id, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    }
+    res.json({ succeeded, failed });
   })
 );
 

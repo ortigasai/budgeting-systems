@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 // Note 12 revision - "All tables and charts should be able to be viewed
 // into a bigger pop-up window." Wraps a chart/table with an "Expand" button
@@ -7,7 +7,27 @@ import { useState, type ReactNode } from "react";
 // time (not both, one hidden), so a wrapped child's own internal state
 // (search text, sort order, open/closed rows) doesn't fork into two
 // independent copies while expanded.
-export function ExpandableSection({ title, children, className }: { title?: string; children: ReactNode; className?: string }) {
+//
+// `inlineExpand` lets a table place the button itself (via <ExpandButton />)
+// next to its own content instead of at the section's top-right corner.
+type ExpandState = { open: () => void; expanded: boolean };
+const ExpandContext = createContext<ExpandState>({ open: () => {}, expanded: false });
+
+export function ExpandButton() {
+  const { open, expanded } = useContext(ExpandContext);
+  if (expanded) return null;
+  return (
+    <button
+      onClick={open}
+      title="View in a bigger window"
+      className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-500 hover:bg-slate-100"
+    >
+      ⤢ Expand
+    </button>
+  );
+}
+
+export function ExpandableSection({ title, children, className, inlineExpand }: { title?: string; children: ReactNode; className?: string; inlineExpand?: boolean }) {
   const [expanded, setExpanded] = useState(false);
 
   if (expanded) {
@@ -27,27 +47,22 @@ export function ExpandableSection({ title, children, className }: { title?: stri
               Close ✕
             </button>
           </div>
-          <div className="overflow-auto p-4">{children}</div>
+          <div className="overflow-auto p-4">
+            <ExpandContext.Provider value={{ open: () => {}, expanded: true }}>{children}</ExpandContext.Provider>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`relative ${className ?? ""}`}>
-      {/* z-40 - a wrapped table's own sticky header/frozen columns (e.g.
-          Forecast's GAE/DOE grid) go up to z-30, which otherwise painted
-          right over this button at the same top-right corner, leaving it
-          present in the DOM (still clickable via a direct element
-          reference) but visually invisible/unclickable for a real user. */}
-      <button
-        onClick={() => setExpanded(true)}
-        title="View in a bigger window"
-        className="absolute right-1.5 top-1.5 z-40 rounded border border-slate-300 bg-white/95 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 hover:bg-slate-100"
-      >
-        ⤢ Expand
-      </button>
-      {children}
+    <div className={className}>
+      {!inlineExpand && (
+        <div className="mb-1 flex justify-end">
+          <ExpandButton />
+        </div>
+      )}
+      <ExpandContext.Provider value={{ open: () => setExpanded(true), expanded: false }}>{children}</ExpandContext.Provider>
     </div>
   );
 }

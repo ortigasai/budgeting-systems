@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import type { ReportLineItem, ReportRow } from "../../api/client";
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 function pesoOrDash(n: number | null) {
   return n != null ? peso(n) : "—";
@@ -164,7 +164,7 @@ export function ReportTable({
               <th className="px-2 py-1">Expense Category</th>
               <th className="px-2 py-1">{meta.leftLabel}</th>
               <th className="px-2 py-1">{meta.rightLabel}</th>
-              <th className="px-2 py-1">{meta.varianceLabel} (₱)</th>
+              <th className="px-2 py-1">{meta.varianceLabel} (PHP)</th>
               <th className="px-2 py-1">{meta.varianceLabel} (%)</th>
               <th className="px-2 py-1">Notes</th>
             </tr>

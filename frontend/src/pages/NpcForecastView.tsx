@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, downloadFile, NPC_GROUP_SCOPE_TO_SBU, NPC_SBU_OPTIONS, type NpcSbu } from "../api/client";
+import { api, NPC_GROUP_SCOPE_TO_SBU, NPC_SBU_OPTIONS, type NpcSbu } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { PageHeader } from "../components/PageHeader";
-import { ExpandableSection } from "../components/ExpandableSection";
+import { ExpandableSection, ExpandButton } from "../components/ExpandableSection";
 import { IoDetailModal } from "../components/IoDetailModal";
 import { formatAufnr } from "../lib/formatAufnr";
 import { useFiscalCycle, useFiscalYear } from "../lib/fiscalCycle";
@@ -68,7 +68,7 @@ interface NpcForecastRow {
 type SortColumn = "budgetCode" | "projectTitle" | "npcBudget" | "ioBudget" | "ioActual" | "npcAvailableBudget" | "totalActualForecast" | "npcSurplus" | "remainingMonthsForecast";
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 
@@ -195,9 +195,9 @@ export function NpcForecastView() {
   function sortHeader(column: SortColumn, label: string) {
     const active = sortColumn === column;
     return (
-      <button type="button" onClick={() => toggleSort(column)} className={`inline-flex items-center gap-0.5 hover:underline ${active ? "text-emerald-900" : ""}`}>
+      <button type="button" onClick={() => toggleSort(column)} className="inline-flex items-center gap-1 font-semibold hover:underline">
         {label}
-        <span className="text-[10px]">{active ? (sortDirection === "asc" ? "▲" : "▼") : ""}</span>
+        <span aria-hidden className={`text-[10px] ${active ? "opacity-100" : "opacity-30"}`}>{active ? (sortDirection === "asc" ? "▲" : "▼") : "▲"}</span>
       </button>
     );
   }
@@ -212,29 +212,6 @@ export function NpcForecastView() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["forecast", "npc", effectiveSbu] }),
   });
 
-  const [uploadStatus, setUploadStatus] = useState<{ ok: boolean; message: string } | null>(null);
-  const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("npcSbu", effectiveSbu);
-      try {
-        return (await api.post<{ ok: boolean; updated?: number; errors?: { row: number; error: string }[] }>("/forecast/npc/upload", form)).data;
-      } catch (err: any) {
-        if (err.response?.status === 400 && err.response.data?.errors) return err.response.data;
-        throw err;
-      }
-    },
-    onSuccess: (data) => {
-      if (data.ok === false) {
-        setUploadStatus({ ok: false, message: `${data.errors?.length ?? 0} row(s) rejected - fix and re-upload.` });
-      } else {
-        setUploadStatus({ ok: true, message: `Updated ${data.updated} row(s).` });
-        queryClient.invalidateQueries({ queryKey: ["forecast", "npc", effectiveSbu] });
-      }
-    },
-  });
-
   if (!effectiveSbu) {
     return (
       <div className="space-y-4">
@@ -245,98 +222,78 @@ export function NpcForecastView() {
 
   return (
     <div className="space-y-4">
+      <div className="sticky top-0 z-30 space-y-2 bg-slate-100 pb-1 pt-1">
       <PageHeader
         subtitle={`Months through ${MONTH_NAMES[asOfMonth - 1]} are already in Actuals - only remaining months are editable.`}
         actions={
-          mySbus.length > 1 ? (
-            <select className="rounded border border-slate-300 px-2 py-1.5 text-sm" value={effectiveSbu} onChange={(e) => setPickedSbu(e.target.value as NpcSbu)}>
-              {NPC_SBU_OPTIONS.filter((o) => mySbus.includes(o.value)).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          ) : undefined
+          <div className="flex items-center gap-3">
+            {isBudgetOfficer && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-slate-600">YTD Actual through</label>
+                <select className="rounded border border-slate-300 bg-white px-2 py-1 text-sm" value={fiscalCycle?.npcAsOfMonth2026 ?? 9} onChange={(e) => asOfMonthMutation.mutate(Number(e.target.value))}>
+                  {MONTH_NAMES.map((name, i) => (
+                    <option key={name} value={i + 1}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {mySbus.length > 1 && (
+              <select className="rounded border border-slate-300 px-2 py-1.5 text-sm" value={effectiveSbu} onChange={(e) => setPickedSbu(e.target.value as NpcSbu)}>
+                {NPC_SBU_OPTIONS.filter((o) => mySbus.includes(o.value)).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         }
       />
-
-      {isBudgetOfficer && (
-        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-slate-600">YTD Actual through</label>
-            <select className="rounded border border-slate-300 px-2 py-1 text-sm" value={fiscalCycle?.npcAsOfMonth2026 ?? 9} onChange={(e) => asOfMonthMutation.mutate(Number(e.target.value))}>
-              {MONTH_NAMES.map((name, i) => (
-                <option key={name} value={i + 1}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
+      <div className="grid grid-cols-1 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-2">
+        <div>
+          <label className="block font-medium text-emerald-800">SBU</label>
+          <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{NPC_SBU_OPTIONS.find((o) => o.value === effectiveSbu)?.label ?? "—"}</div>
         </div>
-      )}
-
-      {targetYear >= 2027 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <button
-            type="button"
-            onClick={() =>
-              downloadFile(`/forecast/npc/template?npcSbu=${effectiveSbu}`, `npc-forecast-template-${String(effectiveSbu).toLowerCase()}.xlsx`).catch(() =>
-                setUploadStatus({ ok: false, message: "Failed to download the template." })
-              )
-            }
-            className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
-          >
-            Open Spreadsheet Template
-          </button>
-          <label className="cursor-pointer rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
-            {uploadMutation.isPending ? "Uploading…" : "Upload Completed Template"}
-            <input
-              type="file"
-              accept=".xlsx"
-              className="hidden"
-              disabled={uploadMutation.isPending}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-                setUploadStatus(null);
-                uploadMutation.mutate(file);
-              }}
-            />
-          </label>
-          {uploadStatus && <span className={`text-xs ${uploadStatus.ok ? "text-emerald-700" : "text-red-600"}`}>{uploadStatus.message}</span>}
+        <div>
+          <label className="block font-medium text-emerald-800">Forecast Year</label>
+          <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{forecastYear}</div>
         </div>
-      )}
+      </div>
+      </div>
 
       {isError && <div className="text-sm text-red-700">You do not have access to this SBU's NPC forecast.</div>}
 
-      <div className="flex items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
         <input
-          type="text"
-          placeholder="Filter by Budget Code, Project Title, or IO Code…"
+          type="search"
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          className="w-80 rounded border border-slate-300 px-2 py-1 text-sm"
+          placeholder="Filter by Budget Code, Project Title, or IO Code…"
+          className="w-96 rounded border border-slate-300 px-2 py-1"
         />
         {filterText && (
-          <button type="button" onClick={() => setFilterText("")} className="text-xs text-slate-500 hover:underline">
+          <button type="button" onClick={() => setFilterText("")} className="text-emerald-700 hover:underline">
             Clear
           </button>
         )}
-        {filterText && (
-          <span className="text-xs text-slate-500">
-            {displayRows.length} of {rows.length} row(s)
-          </span>
-        )}
       </div>
 
-      <ExpandableSection title="NPC Forecast">
+      <ExpandableSection title="NPC Forecast" inlineExpand>
         {/* max-h + overflow-auto (not a lone overflow-x-auto) so this is a
             real 2-axis scroll pane - a bare overflow-x-auto gets silently
             upgraded to overflow-y: auto too per the CSS spec once any
             sticky descendant needs a containing block, which leaves
             `position: sticky` inert with no explicit height cap (same fix
             ForecastPage.tsx's GAE/DOE grid already needed). */}
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-xs italic text-slate-500">All amounts are in PHP.</p>
+            <span className="text-xs text-slate-500">Showing {displayRows.length} of {rows.length} line item(s)</span>
+          </div>
+          <ExpandButton />
+        </div>
         <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
           <table className="table-fixed text-xs" style={{ width: Array.from({ length: columnCount }, (_, i) => colWidthPx(i)).reduce((a, b) => a + b, 0) }}>
             <colgroup>
@@ -348,7 +305,7 @@ export function NpcForecastView() {
                 one unit - sticky on <thead> itself, not each <tr>, sticks
                 every row inside it without needing to hand-compute a `top`
                 offset per row. */}
-            <thead className="sticky top-0 z-20 bg-emerald-50 text-left tracking-wide text-emerald-800">
+            <thead className="sticky top-0 z-20 bg-[#edf6f1] text-left tracking-wide text-[#164b33]">
               <tr>
                 <th rowSpan={2} className="sticky z-30 whitespace-nowrap bg-emerald-50 px-2 py-2 align-bottom" style={{ left: FROZEN_LEFT_PX[0] }}>
                   {sortHeader("budgetCode", "Budget Code")}
@@ -375,13 +332,13 @@ export function NpcForecastView() {
                   {sortHeader("npcAvailableBudget", "NPC Available Budget")}
                 </th>
                 <th colSpan={remainingMonths.length + 1} className="px-2 py-2 text-center">
-                  Forecast
+                  Remaining Months Forecast
                 </th>
                 <th rowSpan={2} className="px-2 py-2 text-right align-bottom">
                   {sortHeader("totalActualForecast", "Total Actual + Forecast")}
                 </th>
-                <th rowSpan={2} className="px-2 py-2 text-right align-bottom">
-                  {sortHeader("npcSurplus", "NPC Surplus/(Deficit)")}
+                <th rowSpan={2} className="px-2 py-2 text-right align-bottom break-words">
+                  {sortHeader("npcSurplus", "NPC Surplus/​(Deficit)")}
                 </th>
               </tr>
               <tr>
@@ -391,12 +348,12 @@ export function NpcForecastView() {
                   </th>
                 ))}
                 <th className="px-2 py-2 text-right">
-                  {sortHeader("remainingMonthsForecast", "Total Forecast")}
+                  {sortHeader("remainingMonthsForecast", "Total")}
                 </th>
               </tr>
               {rows.length > 0 && (
-                <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-slate-700">
-                  <td className="sticky z-30 whitespace-nowrap bg-slate-50 px-2 py-1" style={{ left: FROZEN_LEFT_PX[0] }} colSpan={2}>
+                <tr className="border-t-2 border-emerald-200 bg-[#edf6f1] font-semibold text-[#164b33]">
+                  <td className="sticky z-30 whitespace-nowrap bg-[#edf6f1] px-2 py-1" style={{ left: FROZEN_LEFT_PX[0] }} colSpan={2}>
                     TOTAL
                   </td>
                   <td className="whitespace-nowrap px-2 py-1 text-right">{peso(totals.npcBudget)}</td>
@@ -449,11 +406,11 @@ export function NpcForecastView() {
                   // else.
                   const isFirstCarryOver = r.isCarryOver && !displayRows[i - 1]?.isCarryOver;
                   return (
-                    <tr key={r.budgetCode} className={isFirstCarryOver ? "border-t-2 border-slate-200" : undefined}>
-                      <td className={`sticky z-10 whitespace-nowrap bg-white px-2 py-1 ${r.isCarryOver ? "italic text-slate-400" : ""}`} style={{ left: FROZEN_LEFT_PX[0] }}>
+                    <tr key={r.budgetCode} className={`${isFirstCarryOver ? "border-t-2 border-slate-200" : "border-t border-slate-100"} ${i % 2 === 1 ? "bg-slate-50/60" : "bg-white"}`}>
+                      <td className={`sticky z-10 whitespace-nowrap ${i % 2 === 1 ? "bg-slate-50" : "bg-white"} px-2 py-1 ${r.isCarryOver ? "italic text-slate-400" : ""}`} style={{ left: FROZEN_LEFT_PX[0] }}>
                         {r.isCarryOver ? "Carry-over" : r.budgetCode}
                       </td>
-                      <td className="sticky z-10 truncate bg-white px-2 py-1" style={{ left: FROZEN_LEFT_PX[1] }} title={r.projectTitle}>
+                      <td className={`sticky z-10 truncate ${i % 2 === 1 ? "bg-slate-50" : "bg-white"} px-2 py-1`} style={{ left: FROZEN_LEFT_PX[1] }} title={r.projectTitle}>
                         {r.projectTitle}
                       </td>
                       <td className="whitespace-nowrap px-2 py-1 text-right">{peso(r.npcBudget)}</td>

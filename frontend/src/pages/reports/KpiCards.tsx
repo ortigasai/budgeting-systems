@@ -1,5 +1,5 @@
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // Note 12 - Section 1's 4 fixed KPI cards: Baseline (the starting/reference

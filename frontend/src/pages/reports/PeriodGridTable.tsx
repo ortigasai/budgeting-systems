@@ -3,7 +3,7 @@ import type { PeriodGridResult } from "../../api/client";
 import { HEATMAP_THRESHOLD_PCT } from "./ReportTable";
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 function heatmapClass(variancePct: number | null): string {

@@ -35,7 +35,7 @@ export function SbuTypeSwitch({ mode, current }: { mode: "forecast" | "request";
           <Link
             key={t.key}
             to={mode === "forecast" ? `/forecast?category=${t.key}` : `/requests/new?tab=${t.tab}`}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${active ? "bg-emerald-700 text-white" : "bg-slate-100 text-slate-600 hover:bg-emerald-50"}`}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${active ? "bg-emerald-800 text-white" :"bg-slate-100 text-slate-600 hover:bg-emerald-50"}`}
           >
             {t.label}
           </Link>

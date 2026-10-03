@@ -168,18 +168,18 @@ export function RequestDetailPage() {
         )}
       {submitError && <div className="rounded bg-red-50 p-3 text-sm text-red-700">{submitError}</div>}
 
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
         <Field label="Originating Department" value={request.department.name} />
         {line.ownerDepartmentName && <Field label="Owning (Centralized) Department" value={line.ownerDepartmentName} />}
         <Field label="GL-CC" value={line.glCc} />
         <Field label="Budget Code" value={line.budgetCode ?? "—"} />
         <Field label="Fiscal Year" value={String(request.fiscalYear)} />
-        <Field label="Proposed Amount" value={`₱${request.proposedAmount.toLocaleString()}`} accent />
+        <Field label="Proposed Amount" value={`${request.proposedAmount.toLocaleString()}`} accent />
         {request.requestCategory === "NPC" && request.npcSbu && <Field label="SBU" value={request.npcSbu} />}
         {request.requestCategory === "NPC" && request.npcLocation && <Field label="Location" value={request.npcLocation} />}
         {request.requestCategory === "NPC" && request.projectStartDate && <Field label="Project Start" value={new Date(request.projectStartDate).toLocaleDateString()} />}
         {request.requestCategory === "NPC" && request.projectEndDate && <Field label="Project End" value={new Date(request.projectEndDate).toLocaleDateString()} />}
-        {request.budgetCutAmount > 0 && <Field label="Budget Cut" value={`₱${request.budgetCutAmount.toLocaleString()}`} />}
+        {request.budgetCutAmount > 0 && <Field label="Budget Cut" value={`${request.budgetCutAmount.toLocaleString()}`} />}
         {request.isOverBudget && <Field label="Flag" value="Over-budget / Requires Realignment" />}
         {request.sapDocumentNumber && <Field label="SAP Document #" value={request.sapDocumentNumber} />}
         {request.reasonCode && <Field label="Return Reason" value={request.reasonCode} />}

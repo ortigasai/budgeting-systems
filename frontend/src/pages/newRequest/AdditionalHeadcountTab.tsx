@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
+import { useAuth } from "../../context/AuthContext";
+import { useFiscalYear } from "../../lib/fiscalCycle";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type AdditionalHeadcountRequest, type Company } from "../../api/client";
 import { SectionLabel } from "../../components/TabBar";
@@ -47,6 +49,13 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
   });
   const [created, setCreated] = useState<AdditionalHeadcountRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { currentUser } = useAuth();
+  const { targetYear: FISCAL_YEAR } = useFiscalYear();
+  const [frozenHeaderEl, setFrozenHeaderEl] = useState<HTMLDivElement | null>(null);
+  const [frozenHeaderHeight, setFrozenHeaderHeight] = useState(0);
+  useLayoutEffect(() => {
+    if (frozenHeaderEl) setFrozenHeaderHeight(frozenHeaderEl.offsetHeight);
+  });
 
   // Notes_7: Rank 1 (Project-based) can only be requested against the two
   // project companies; Rank 2 (Outsourced) is always the Outsourced company.
@@ -132,19 +141,34 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
   const canSubmit = form.position && form.rank && form.companyId && form.estimatedHireDate && form.justification;
 
   return (
-    <div className="mx-auto max-w-xl space-y-4">
-      <PageHeader
-        subtitle={subtitle}
-        actions={
-          <button
-            onClick={() => createMutation.mutate()}
-            disabled={!canSubmit || createMutation.isPending}
-            className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
-          >
-            Submit Request
-          </button>
-        }
-      />
+    <div className="mx-auto max-w-6xl space-y-4">
+      <div ref={setFrozenHeaderEl} className="sticky top-0 z-30 space-y-4 bg-slate-100 pb-3 pt-1">
+        <PageHeader
+          subtitle={subtitle}
+          actions={
+            <button
+              onClick={() => createMutation.mutate()}
+              disabled={!canSubmit || createMutation.isPending}
+              className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
+            >
+              Submit Request
+            </button>
+          }
+        />
+        <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm">
+          <div>
+            <label className="block font-medium text-emerald-800">Originating Department</label>
+            <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{currentUser?.department?.name}</div>
+          </div>
+          <div>
+            <label className="block font-medium text-emerald-800">Target Calendar Year</label>
+            <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{FISCAL_YEAR}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+      <div className="space-y-4 lg:col-span-3">
       <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
         Approved by your Department Head, then the HR Analyst, then the HR Head. Approved requests are reflected in
         the Manpower Budget's headcount for the selected company.
@@ -216,6 +240,20 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
             onChange={(e) => setForm({ ...form, justification: e.target.value })}
           />
         </div>
+      </div>
+      </div>
+
+      <div className="space-y-4 lg:col-span-2">
+        <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-sm shadow-sm lg:sticky" style={{ top: frozenHeaderHeight + 16 }}>
+          <SectionLabel>Quick Guide</SectionLabel>
+          <ol className="list-decimal space-y-1.5 pl-5 text-xs text-slate-700">
+            <li>Pick the Position from the list. Rank and Company are needed too.</li>
+            <li>Enter the Estimated Hire Date.</li>
+            <li>Write a Justification for the headcount.</li>
+            <li>Submit Request. It goes to your Department Head, then the HR Analyst, then the HR Head.</li>
+          </ol>
+        </div>
+      </div>
       </div>
 
       {error && <div className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</div>}

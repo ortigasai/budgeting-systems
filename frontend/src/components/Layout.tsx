@@ -7,6 +7,7 @@ import { SBU_TYPES } from "./SbuTypeSwitch";
 import { RoleSwitcher } from "./RoleSwitcher";
 import { UserMenu } from "./UserMenu";
 import { phaseForPath } from "../lib/phases";
+import { sfSbus } from "../lib/groupScope";
 import { useFiscalYear } from "../lib/fiscalCycle";
 import { ADMIN_GROUPS, ADMIN_TABS } from "../pages/admin/AdminConsolePage";
 
@@ -91,7 +92,9 @@ function CollapsibleNavGroup({ to, icon, label, defaultOpen, children }: { to: s
 function NewRequestSubMenu() {
   const [searchParams] = useSearchParams();
   const currentTab = searchParams.get("tab");
-  const { gate } = useAuth();
+  const { gate, currentUser, hasRole } = useAuth();
+  const sbuAllowed = sfSbus(currentUser, hasRole("BUDGET_OFFICER"));
+  const noSbuScope = Array.isArray(sbuAllowed) && sbuAllowed.length === 0;
 
   return (
     <div className="ml-7 mt-1 flex flex-col gap-0.5 border-l border-emerald-100 pl-3">
@@ -100,7 +103,7 @@ function NewRequestSubMenu() {
           General &amp; Administrative Expenses (GAE)
         </NavLink>
       )}
-      {SBU_TYPES.some((t) => gate(`request.${t.access}`, t.key === "DOE" || t.key === "REVENUE")) && (
+      {!noSbuScope && SBU_TYPES.some((t) => gate(`request.${t.access}`, t.key === "DOE" || t.key === "REVENUE")) && (
         <NavLink
           to={`/requests/new?tab=${SBU_TYPES.find((t) => gate(`request.${t.access}`, t.key === "DOE" || t.key === "REVENUE"))!.tab}`}
           className={subLinkClass(SBU_TYPES.some((t) => t.tab === currentTab))}
@@ -589,7 +592,7 @@ export function Layout() {
   // carrying the same branding.
   return (
     <div className="flex h-screen flex-col bg-slate-100">
-      <div className="flex shrink-0 items-center justify-between bg-emerald-800 px-6 py-4">
+      <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-emerald-800 to-emerald-600 px-6 py-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15 text-lg font-bold text-white ring-1 ring-white/30">₱</div>
           <div className="leading-tight">

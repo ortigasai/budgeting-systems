@@ -10,7 +10,7 @@ const COLOR_GRID = "#e1e0d9";
 const COLOR_AXIS = "#898781";
 
 function peso(n: number) {
-  return `₱${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 interface Point {

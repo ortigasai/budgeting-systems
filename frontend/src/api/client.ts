@@ -503,6 +503,10 @@ export interface BudgetRequest {
   // server-side from its stage + department (see lib/pendingReviewers.ts).
   // Present on /my-requests and GET /:id responses; empty for terminal stages.
   pendingReviewers?: string[];
+  // Set when this request came from a bulk spreadsheet upload - lets the UI
+  // offer "Download source file" (GET /budget-requests/bulk-upload/:id/source-file).
+  bulkUploadBatchId: string | null;
+  bulkUploadBatch: { id: string; sourceFileRef: string } | null;
 }
 
 const SBU_BATCH_CATEGORY_LABELS: Partial<Record<RequestCategory, string>> = {
