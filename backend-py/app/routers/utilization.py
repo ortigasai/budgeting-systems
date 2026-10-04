@@ -135,6 +135,9 @@ class NpcUtilizationRow(BaseModel):
     projectTitle: str
     amount: float  # NPC's approved amount (VAT exclusive), net of any budget cut
     location: str | None
+    # The Monitoring tab's Group for this budget code's IOs (distinct values
+    # joined with ", ") - shown in the NPC table in place of location.
+    group: str | None = None
     sbu: str
     # A budget code can fund more than one Internal Order Request, so this is
     # a list rather than a single value - each entry is that IO's SAP
@@ -974,6 +977,19 @@ def _effective_actual(io: NpcMonitoringIo, as_of_month: int | None) -> float:
     return io.actual
 
 
+def _io_sap_figures(
+    io: NpcMonitoringIo, salr_by_aufnr: dict[str, SapSalrRaw], as_of_month: int | None
+) -> tuple[float, float]:
+    """(budget, actual) for one IO from SAP's S_ALR_87013019 cache. Falls back
+    to the Monitoring workbook's own figures only for an IO the cache doesn't
+    have yet, so it still shows up in the table instead of as zeros.
+    """
+    row = salr_by_aufnr.get(io.aufnr.lstrip("0") or "0")
+    if row is not None:
+        return row.budget, row.actual
+    return io.budget, _effective_actual(io, as_of_month)
+
+
 def _npc_utilization_from_monitoring_import(
     session: Session, fiscal_year: int, effective_sbu: str, as_of_month: int | None
 ) -> list[NpcUtilizationRow] | None:
@@ -1008,24 +1024,30 @@ def _npc_utilization_from_monitoring_import(
         if io.budget_code:
             ios_by_budget_code.setdefault(io.budget_code, []).append(io)
 
+    # IO Budget and Actual come from SAP's S_ALR_87013019 cache (see
+    # _io_sap_figures), keyed by AUFNR with leading zeros dropped.
+    salr_by_aufnr = {(r.aufnr.lstrip("0") or "0"): r for r in session.exec(select(SapSalrRaw).where(SapSalrRaw.fiscal_year == fiscal_year)).all()}
+    figures = {io.aufnr: _io_sap_figures(io, salr_by_aufnr, as_of_month) for io in ios}
+
     rows: list[NpcUtilizationRow] = []
     for project in projects:
         matched = ios_by_budget_code.get(project.budget_code, [])
-        io_amount = sum(io.budget for io in matched)
-        io_actual = sum(_effective_actual(io, as_of_month) for io in matched) if matched else None
+        io_amount = sum(figures[io.aufnr][0] for io in matched)
+        io_actual = sum(figures[io.aufnr][1] for io in matched) if matched else None
         rows.append(
             NpcUtilizationRow(
                 budgetCode=project.budget_code,
                 projectTitle=project.project_title,
                 amount=round(project.revised_amount, 2),
                 location=None,
+                group=", ".join(sorted({io.group_name for io in matched if io.group_name})) or None,
                 sbu=project.npc_sbu,
                 # AUFNRs, not sap_document_number values - the live-workflow
                 # path's ioCodes are IO document numbers for the same
                 # display purpose (a list the frontend just joins/shows).
                 ioCodes=sorted(io.aufnr for io in matched),
                 ios=[
-                    NpcIoDetail(aufnr=io.aufnr, description=io.io_description, budget=round(io.budget, 2), actual=round(_effective_actual(io, as_of_month), 2))
+                    NpcIoDetail(aufnr=io.aufnr, description=io.io_description, budget=round(figures[io.aufnr][0], 2), actual=round(figures[io.aufnr][1], 2))
                     for io in sorted(matched, key=lambda io: io.aufnr)
                 ],
                 ioAmount=round(io_amount, 2),
@@ -1064,14 +1086,15 @@ def _npc_utilization_from_monitoring_import(
         NpcUtilizationRow(
             budgetCode=f"Carry-over ({_short_aufnr(io.aufnr)})",
             projectTitle=io.io_description,
-            amount=round(io.carry_over_revised_amount if io.carry_over_revised_amount is not None else io.budget, 2),
+            amount=round(io.carry_over_revised_amount if io.carry_over_revised_amount is not None else figures[io.aufnr][0], 2),
             location=None,
+            group=io.group_name,
             sbu=io.npc_sbu,
             ioCodes=[io.aufnr],
-            ios=[NpcIoDetail(aufnr=io.aufnr, description=io.io_description, budget=round(io.budget, 2), actual=round(_effective_actual(io, as_of_month), 2))],
-            ioAmount=round(io.budget, 2),
-            balance=round((io.carry_over_revised_amount if io.carry_over_revised_amount is not None else io.budget) - io.budget, 2),
-            actual=round(_effective_actual(io, as_of_month), 2),
+            ios=[NpcIoDetail(aufnr=io.aufnr, description=io.io_description, budget=round(figures[io.aufnr][0], 2), actual=round(figures[io.aufnr][1], 2))],
+            ioAmount=round(figures[io.aufnr][0], 2),
+            balance=round((io.carry_over_revised_amount if io.carry_over_revised_amount is not None else figures[io.aufnr][0]) - figures[io.aufnr][0], 2),
+            actual=round(figures[io.aufnr][1], 2),
             isCarryOver=True,
         )
         for io in ios
@@ -1104,9 +1127,9 @@ def npc_utilization_export(
     wb = Workbook()
     ws = wb.active
     ws.title = "NPC Utilization"
-    ws.append(["Budget Code", "Project Title", "Amount (VAT excl.)", "Location", "SBU", "IO Code", "IO Amount", "Balance"])
+    ws.append(["Budget Code", "Project Title", "Amount (VAT excl.)", "Group", "SBU", "IO Code", "IO Amount", "Balance"])
     for r in rows:
-        ws.append([r.budgetCode, r.projectTitle, r.amount, r.location or "", r.sbu, ", ".join(_short_aufnr(c) for c in r.ioCodes), r.ioAmount, r.balance])
+        ws.append([r.budgetCode, r.projectTitle, r.amount, r.group or "", r.sbu, ", ".join(_short_aufnr(c) for c in r.ioCodes), r.ioAmount, r.balance])
     ws.append([])
     ws.append(["Total", None, sum(r.amount for r in rows), None, None, None, sum(r.ioAmount for r in rows), sum(r.balance for r in rows)])
 

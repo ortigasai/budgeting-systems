@@ -61,7 +61,7 @@ table thead th {
   padding-top: 6px !important;
   padding-bottom: 6px !important;
   border: 0 !important;
-  box-shadow: inset 0 -1px 0 #a7f3d0;
+  box-shadow: inset 0 -1px 0 #a7d5bf;
 }
 
 table tbody td {
@@ -93,3 +93,17 @@ main .overflow-x-auto:has(> table) {
   max-height: 75vh;
   overflow-y: auto;
 }
+
+/* Dark green sidebar: the nav's shared link and label colors are light-on-white,
+   so this scope re-points them for the dark background. */
+.sidebar-dark a { color: #d1fae5 !important; }
+.sidebar-dark a:hover { background-color: rgba(255, 255, 255, 0.08) !important; color: #ffffff !important; }
+.sidebar-dark a.bg-emerald-700 { background-color: #3a8a63 !important; color: #ffffff !important; }
+.sidebar-dark a.bg-emerald-100 { color: #123a28 !important; }
+.sidebar-dark .text-slate-400 { color: #86c7a6 !important; }
+.sidebar-dark .text-emerald-800\/70 { color: #a7d5bf !important; }
+.sidebar-dark .border-slate-100 { border-color: rgba(255, 255, 255, 0.12) !important; }
+.sidebar-dark button:hover { background-color: rgba(255, 255, 255, 0.08) !important; color: #ffffff !important; }
+
+/* Outer frame around each table. */
+main .overflow-x-auto:has(> table) { border: 1px solid #a7d5bf; }

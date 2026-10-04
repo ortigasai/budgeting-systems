@@ -199,14 +199,14 @@ export function MyRequestsPage() {
                           )}
                         </td>
                         <td className="px-4 py-2 text-slate-500">{requestLineDisplay(row.data).budgetCode ?? "—"}</td>
-                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.proposedAmount.toLocaleString()}</td>
+                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.proposedAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                         {/* Notes_10: "Budget Cut" and "Approved Amount" —
                             only the Budget Officer can set budgetCutAmount
                             (enforced at /budget-requests/:id/budget-cut,
                             requireRole(BUDGET_OFFICER), applied at Step5);
                             this just surfaces what they set, net of it. */}
-                        <td className="px-4 py-2 text-slate-500">{row.data.budgetCutAmount > 0 ? `${row.data.budgetCutAmount.toLocaleString()}` : "—"}</td>
-                        <td className="px-4 py-2 font-medium text-emerald-800">{(row.data.proposedAmount - row.data.budgetCutAmount).toLocaleString()}</td>
+                        <td className="px-4 py-2 text-slate-500">{row.data.budgetCutAmount > 0 ? `${row.data.budgetCutAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : "—"}</td>
+                        <td className="px-4 py-2 font-medium text-emerald-800">{(row.data.proposedAmount - row.data.budgetCutAmount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                         <td className="px-4 py-2">
                           <StatusBadge stage={row.data.currentStage} />
                           <PendingReviewers names={row.data.pendingReviewers} />
@@ -249,7 +249,7 @@ export function MyRequestsPage() {
                             that don't apply, same convention headcount uses
                             above. */}
                         <td className="px-4 py-2 text-slate-400">N/A</td>
-                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.totalAmount.toLocaleString()}</td>
+                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                         <td className="px-4 py-2 text-slate-400">N/A</td>
                         <td className="px-4 py-2 text-slate-400">N/A</td>
                         <td className="px-4 py-2">{REVENUE_STAGE_LABELS[row.data.currentStage] ?? row.data.currentStage}</td>
@@ -268,7 +268,7 @@ export function MyRequestsPage() {
                             this row only exists pre-submit, so N/A for the
                             same reason Revenue's does above. */}
                         <td className="px-4 py-2 text-slate-400">N/A</td>
-                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.totalAmount.toLocaleString()}</td>
+                        <td className="px-4 py-2 font-medium text-slate-700">{row.data.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                         <td className="px-4 py-2 text-slate-400">N/A</td>
                         <td className="px-4 py-2 text-slate-400">N/A</td>
                         <td className="px-4 py-2">

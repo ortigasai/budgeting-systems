@@ -6,8 +6,8 @@ import type { FinancialScope } from "../../api/client";
 // 3-segment donut for part-to-whole is explicitly fine per that skill ("part-
 // to-whole at a glance only, <=6 segments" - the anti-pattern is a donut for
 // *comparing close values*, not this).
-const SCOPE_COLORS: Record<FinancialScope, string> = { OPEX: "#2a78d6", REVENUE: "#eb6834", NPC: "#1baf7a" };
-const SCOPE_LABELS: Record<FinancialScope, string> = { OPEX: "Operating Expense", REVENUE: "Revenue", NPC: "Non-Project Capex" };
+const SCOPE_COLORS: Record<FinancialScope, string> = { GAE: "#2a78d6", DOE: "#5b9be6", COMMISSION: "#1baf7a", DA: "#eb6834", INTEREST: "#8e5cc8", REVENUE_COS: "#d6a22a", NPC: "#8a9099" };
+const SCOPE_LABELS: Record<FinancialScope, string> = { GAE: "Operating Expense - GAE", DOE: "Operating Expense - DOE", COMMISSION: "Commission", DA: "Depreciation & Amortization", INTEREST: "Interest Expense", REVENUE_COS: "Revenue & Cost of Sales", NPC: "Non-Project Capex" };
 
 function peso(n: number) {
   return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;

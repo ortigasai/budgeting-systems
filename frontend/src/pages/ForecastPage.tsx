@@ -162,9 +162,9 @@ function AmountTd({
       </td>
     );
   }
-  const displayText = thousands ? (value / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 }) : value.toLocaleString();
+  const displayText = thousands ? (value / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 }) : value.toLocaleString(undefined, { maximumFractionDigits: 0 });
   return (
-    <td className={`truncate tabular-nums ${padding} text-right align-top ${className}`} title={value.toLocaleString()}>
+    <td className={`truncate tabular-nums ${padding} text-right align-top ${className}`} title={value.toLocaleString(undefined, { maximumFractionDigits: 0 })}>
       {displayText}
     </td>
   );
@@ -287,7 +287,7 @@ function GaeForecastTable({
       </div>
       <ExpandButton />
     </div>
-    <div className="max-h-[70vh] overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div className="max-h-[70vh] overflow-auto rounded-lg border border-emerald-200 bg-white shadow-sm">
       <table
         className="table-fixed text-xs"
         style={{ width: "100%", minWidth: Array.from({ length: columnCount }, (_, i) => localColWidthPx(i)).reduce((a, b) => a + b, 0) }}
@@ -328,23 +328,17 @@ function GaeForecastTable({
             {frozenWidths.map((_w, i) => {
               const style = { left: frozenLeft[i] };
               if (i === 0) return <td key={i} className="sticky z-10 truncate bg-[#edf6f1] px-1.5 py-1" style={style}>Total</td>;
-              if (i === frozenWidths.length - 1)
-                return (
-                  <td key={i} className="sticky z-10 truncate bg-[#edf6f1] px-1.5 py-1 text-[10px] font-normal text-emerald-700" style={style} title="Total row figures are shown in thousands of pesos - hover a number for its exact value.">
-                    (figures in PHP &apos;000)
-                  </td>
-                );
               return <td key={i} className="sticky z-10 truncate bg-[#edf6f1] px-1.5 py-1" style={style}></td>;
             })}
-            <AmountTd value={totals.approvedBudget2026} thousands />
-            <AmountTd value={totals.ytdActuals2026} thousands />
-            <AmountTd value={totals.availableBudget2026} thousands />
+            <AmountTd value={totals.approvedBudget2026} />
+            <AmountTd value={totals.ytdActuals2026} />
+            <AmountTd value={totals.availableBudget2026} />
             {remainingMonths.map((m) => (
-              <AmountTd key={m} value={totals.monthly[m] ?? 0} thousands />
+              <AmountTd key={m} value={totals.monthly[m] ?? 0} />
             ))}
-            <AmountTd value={totals.remainingMonthsForecast} thousands />
-            <AmountTd value={totals.totalActualForecast} thousands />
-            <AmountTd value={totals.remainingBudget2026} thousands />
+            <AmountTd value={totals.remainingMonthsForecast} />
+            <AmountTd value={totals.totalActualForecast} />
+            <AmountTd value={totals.remainingBudget2026} />
           </tr>
         </thead>
         <tbody>
@@ -471,7 +465,7 @@ function ForecastBreakdownModal({
           </button>
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <div className="overflow-x-auto rounded-lg border border-emerald-200">
           <table className="w-full min-w-[700px] text-xs">
             <thead className="bg-emerald-50 text-left text-[11px] tracking-wide text-emerald-800">
               <tr>
@@ -704,7 +698,7 @@ export function ForecastPage() {
   }, [syncPollData, queryClient]);
 
   const syncInProgress = syncPollData?.status === "running";
-  const lastSyncedLabel = syncPollData?.lastSuccessAt ? `Last synced ${timeAgo(syncPollData.lastSuccessAt)}` : syncPollData && syncPollData.status !== "idle" ? "Never synced successfully yet" : null;
+  const lastSyncedLabel = syncPollData?.lastSuccessAt ? `Last synced ${new Date(syncPollData.lastSuccessAt).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}` : syncPollData && syncPollData.status !== "idle" ? "Never synced successfully yet" : null;
 
   const stage = submission?.stage ?? "DRAFT";
   const isOwnDept = currentUser?.department?.id === effectiveDeptId;
@@ -777,12 +771,12 @@ export function ForecastPage() {
 
   return (
     <div className="space-y-4">
-      <div className="sticky top-0 z-30 -mb-4 space-y-2 bg-slate-100 pb-1 pt-1">
+      <div className="sticky top-0 z-30 -mb-4 space-y-2 bg-[#f5faf7] pb-1 pt-1">
         {is2026RestrictedToBudgetOfficer && (
           <div className="text-sm text-slate-500">{forecastYear} Remaining Months Forecast is entered by the Budget Officer only, via Upload Completed Template — the normal per-department process resumes for the next cycle.</div>
         )}
       <PageHeader
-        subtitle={`Months through ${MONTH_NAMES[(fiscalCycle?.asOfMonth2026 ?? asOfMonth) - 1]} are already in Actuals — only remaining months are editable.`}
+        subtitle={is2026RestrictedToBudgetOfficer ? undefined : `Months through ${MONTH_NAMES[(fiscalCycle?.asOfMonth2026 ?? asOfMonth) - 1]} are already in Actuals — only remaining months are editable.`}
         actions={
           <div className="flex items-center gap-3">
             {isBudgetOfficer && (
@@ -806,7 +800,7 @@ export function ForecastPage() {
           </div>
         }
       />
-      <div className="grid grid-cols-1 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-2">
         <div>
           <label className="block font-medium text-emerald-800">Department</label>
           <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{isAllMode ? "All Departments" : (eligibleDepts.find((d) => d.id === effectiveDeptId)?.name ?? "—")}</div>

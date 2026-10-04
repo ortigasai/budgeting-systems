@@ -34,6 +34,7 @@ from ..models_phase1 import BudgetRequest, Department, ExpenseLineItem, Finalize
 from ..models_phase2 import SapActualTransaction
 from ..models_phase3 import CostCenter, GlAccount
 from ..models_phase4 import PeriodLock, ReportAccessGrant, ReportNote
+from ..models_sap_raw import GaeCcGlMapping, SapGaePastActualRaw, SapKssbV2Raw
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -166,6 +167,32 @@ def _actuals_by_cc_gl(session: Session, fiscal_year: int, months: set[int]) -> d
     return out
 
 
+def _only_gae(m: dict[tuple[str, str], float], gae_pairs: set[tuple[str, str]]) -> dict[tuple[str, str], float]:
+    return {k: v for k, v in m.items() if k in gae_pairs}
+
+
+def _sap_plan_by_cc_gl(session: Session, fiscal_year: int) -> dict[tuple[str, str], float]:
+    """Full-year budget (SAP's plan) per (cost center, GL), from sap_kssb_v2_raw -
+    the same figure the Utilization Overview's Approved Budget uses.
+    """
+    out: dict[tuple[str, str], float] = {}
+    for r in session.exec(select(SapKssbV2Raw).where(SapKssbV2Raw.fiscal_year == fiscal_year)).all():
+        key = (r.cost_center, r.gl_account)
+        out[key] = out.get(key, 0.0) + r.plan
+    return out
+
+
+def _past_actuals_by_cc_gl(session: Session, fiscal_year: int) -> dict[tuple[str, str], float]:
+    """Full-year actuals for a closed year, from the GAE past-years workbook
+    (sap_gae_past_actual_raw) - the live SAP table only holds the current year.
+    """
+    out: dict[tuple[str, str], float] = {}
+    for r in session.exec(select(SapGaePastActualRaw).where(SapGaePastActualRaw.fiscal_year == fiscal_year)).all():
+        key = (r.cost_center, r.gl_account)
+        out[key] = out.get(key, 0.0) + r.amount
+    return out
+
+
 def _actuals_by_cc_gl_by_month(session: Session, fiscal_year: int) -> dict[int, dict[tuple[str, str], float]]:
     """Every actual for `fiscal_year`, fetched once and pre-bucketed by month
     (1-12). Callers that need several different month-subsets of the same
@@ -282,8 +309,8 @@ def _sbu_by_cc_gl(session: Session) -> dict[tuple[str, str], str]:
 # 3-way split doesn't distinguish them, and every other "Financial Scope"-
 # adjacent concept in this app (SBU_REPORT_OPTIONS above) already collapses
 # multiple RequestCategory values into one bucket the same way.
-FINANCIAL_SCOPE_OPTIONS = ["OPEX", "REVENUE", "NPC"]
-_REQUEST_CATEGORY_TO_SCOPE = {"GAE": "OPEX", "DOE": "OPEX", "NPC": "NPC", "REVENUE": "REVENUE"}
+FINANCIAL_SCOPE_OPTIONS = ["GAE"]
+_REQUEST_CATEGORY_TO_SCOPE = {"GAE": "GAE", "DOE": "DOE", "NPC": "NPC", "REVENUE": "REVENUE_COS", "COST_OF_SALES": "REVENUE_COS", "COMMISSION": "COMMISSION", "DEPRECIATION_AMORTIZATION": "DA", "INTEREST_EXPENSE": "INTEREST"}
 
 
 def _financial_scope_by_cc_gl(session: Session, fiscal_year: int) -> dict[tuple[str, str], str]:
@@ -296,9 +323,9 @@ def _financial_scope_by_cc_gl(session: Session, fiscal_year: int) -> dict[tuple[
     """
     out: dict[tuple[str, str], str] = {}
     for line in session.exec(select(FinalizedBudgetLine).where(FinalizedBudgetLine.fiscalYear == fiscal_year)).all():
-        out.setdefault((line.costCenter, line.glAccount), _REQUEST_CATEGORY_TO_SCOPE.get(line.requestCategory, "OPEX"))
+        out.setdefault((line.costCenter, line.glAccount), _REQUEST_CATEGORY_TO_SCOPE.get(line.requestCategory, "GAE"))
     for r in session.exec(select(HistoricalActuals).where(HistoricalActuals.fiscalYear == fiscal_year)).all():
-        out.setdefault((r.costCenter, r.glAccount), _REQUEST_CATEGORY_TO_SCOPE.get(r.requestCategory, "OPEX"))
+        out.setdefault((r.costCenter, r.glAccount), _REQUEST_CATEGORY_TO_SCOPE.get(r.requestCategory, "GAE"))
     return out
 
 
@@ -500,7 +527,7 @@ def _build_rows(
         rows.append(
             ReportRowOut(
                 expenseGroup=group,
-                financialScope=financial_scope_by_group.get(group, "OPEX"),
+                financialScope=financial_scope_by_group.get(group, "GAE"),
                 budgetCurrent=b,
                 actualCurrent=a,
                 forecastCurrent=f,
@@ -629,13 +656,71 @@ def trend(
             return rolled.get(expenseGroup, 0.0)
         return sum(rolled.values())
 
+    # GAE only: the same CC-GL pairs the GAE report uses (gae_cc_gl_mapping).
+    gae_pairs = {(m.cost_center, m.gl_account) for m in session.exec(select(GaeCcGlMapping)).all()}
+
     points: list[TrendPointOut] = []
     for fy in sorted(all_years):
         scope_map = _financial_scope_by_cc_gl(session, fy) if scope_list else {}
-        budget_total = _grouped_total(_approved_budget_by_cc_gl(session, fy), scope_map)
-        actual_total = _grouped_total(_actuals_by_cc_gl(session, fy, set(range(1, 13))), scope_map)
+        # Budget is SAP's plan per year (live for 2026, loaded from the past-years workbook for earlier years).
+        budget_total = _grouped_total(_only_gae(_sap_plan_by_cc_gl(session, fy), gae_pairs), scope_map)
+        # Closed years come from the past-years workbook; the current year from the live SAP table.
+        actuals = _past_actuals_by_cc_gl(session, fy) if fy < currentYear else _actuals_by_cc_gl(session, fy, set(range(1, 13)))
+        actual_total = _grouped_total(_only_gae(actuals, gae_pairs), scope_map)
         points.append(TrendPointOut(fiscalYear=fy, budget=budget_total, actual=actual_total))
     return points
+
+
+class TrendTypePointOut(BaseModel):
+    fiscalYear: int
+    budget: float
+    actual: float
+
+
+class TrendTypeOut(BaseModel):
+    key: str
+    label: str
+    points: list[TrendTypePointOut]
+
+
+@router.get("/trend-by-type", response_model=list[TrendTypeOut])
+def trend_by_type(
+    currentYear: int,
+    user: AuthedUser = Depends(require_report_access),
+    session: Session = Depends(get_session),
+):
+    """The 5-Year Trend split by GAE Main Report type (Salaries, PB, ... Others) -
+    the same 5-point window, GAE pairs and budget/actual sources as /trend.
+    """
+    from .gae_report import MAIN_MANPOWER, MAIN_NON_MANPOWER, _norm
+
+    type_by_pair = {(m.cost_center, m.gl_account): _norm(m.type) for m in session.exec(select(GaeCcGlMapping)).all()}
+    gae_pairs = set(type_by_pair)
+    years = list(range(currentYear - 4, currentYear + 1))
+    totals: dict[str, dict[int, list[float]]] = {}
+
+    for fy in years:
+        budgets = _only_gae(_sap_plan_by_cc_gl(session, fy), gae_pairs)
+        actuals = _only_gae(
+            _past_actuals_by_cc_gl(session, fy) if fy < currentYear else _actuals_by_cc_gl(session, fy, set(range(1, 13))),
+            gae_pairs,
+        )
+        for key, value in budgets.items():
+            totals.setdefault(type_by_pair[key], {}).setdefault(fy, [0.0, 0.0])[0] += value
+        for key, value in actuals.items():
+            totals.setdefault(type_by_pair[key], {}).setdefault(fy, [0.0, 0.0])[1] += value
+
+    out: list[TrendTypeOut] = []
+    for label, norm in MAIN_MANPOWER + MAIN_NON_MANPOWER:
+        per_year = totals.get(norm, {})
+        out.append(
+            TrendTypeOut(
+                key=norm,
+                label=label,
+                points=[TrendTypePointOut(fiscalYear=fy, budget=per_year.get(fy, [0.0, 0.0])[0], actual=per_year.get(fy, [0.0, 0.0])[1]) for fy in years],
+            )
+        )
+    return out
 
 
 class SeriesPointOut(BaseModel):
@@ -803,7 +888,7 @@ def period_grid(
         rows.append(
             PeriodGridRowOut(
                 expenseGroup=group,
-                financialScope=financial_scope_by_group.get(group, "OPEX"),
+                financialScope=financial_scope_by_group.get(group, "GAE"),
                 cells=cells,
                 total=_period_grid_cell(annual_budget, total_actual),
             )

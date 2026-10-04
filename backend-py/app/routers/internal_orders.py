@@ -339,7 +339,7 @@ def _assert_salr_available(session: Session, fiscal_year: int, aufnr: str, amoun
     if amount > row.available:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f'Internal Order "{aufnr}" only has {row.available:,.2f} available in SAP, less than the requested {amount:,.2f}.',
+            f'Internal Order "{aufnr}" only has {row.available:,.0f} available in SAP, less than the requested {amount:,.0f}.',
         )
 
 

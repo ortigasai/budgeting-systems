@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Department, type DemoUser } from "../../api/client";
 import { SearchableSelect } from "../../components/SearchableSelect";
 import { roleLabel } from "../../components/RoleSwitcher";
+import { SortableHeader, TableFilter } from "../../components/SortableHeader";
+import { useTableSort } from "../../lib/useTableSort";
 
 interface RoleAssignment {
   id: string;
@@ -11,9 +13,19 @@ interface RoleAssignment {
   user: { id: string; name: string; email: string };
 }
 
-// Notes_7: role list and order follow the "Role" tab of the real "Budgeting
-// System_Employee List" file exactly.
-const ROLE_TYPES = ["BUDGET_OFFICER", "BCA_HEAD", "DEPARTMENT_HEAD", "DEPARTMENT_PREPARER", "CENTRALIZED_BUDGET_PREPARER", "CENTRALIZED_FIRST_LEVEL_REVIEWER", "CENTRALIZED_DEPARTMENT_HEAD", "CFO", "CEO", "HR_ANALYST"];
+// Role dropdown, in the order of the approval workflow's Roles list. Department
+// Head and SBU or Division Head aren't assigned here: the requester picks them
+// from the list when submitting. Tiered approvers (BCA Head / CFO / CEO) appear
+// once each; SBU Finance and SBU Head roles are assigned in SBU Roles instead.
+const ROLE_TYPES = [
+  "HR_ANALYST",
+  "CENTRALIZED_BUDGET_PREPARER",
+  "CENTRALIZED_DEPARTMENT_HEAD",
+  "BUDGET_OFFICER",
+  "BCA_HEAD",
+  "CFO",
+  "CEO",
+];
 
 export function RoleAssignmentsTab() {
   const queryClient = useQueryClient();
@@ -29,6 +41,20 @@ export function RoleAssignmentsTab() {
   // Sort alphabetically by department, then user name, so the table reads
   // in a stable, scannable order rather than insertion order.
   const sortedAssignments = useMemo(() => [...assignments].sort((a, b) => a.department.name.localeCompare(b.department.name) || a.user.name.localeCompare(b.user.name)), [assignments]);
+  const [filterText, setFilterText] = useState("");
+  const filteredAssignments = useMemo(() => {
+    const q = filterText.trim().toLowerCase();
+    if (!q) return sortedAssignments;
+    return sortedAssignments.filter((a) =>
+      [a.department.name, roleLabel(a.roleType), a.user.name, a.user.email].some((v) => v.toLowerCase().includes(q))
+    );
+  }, [sortedAssignments, filterText]);
+  const { sorted, sortKey, sortDir, toggle } = useTableSort(filteredAssignments, (a, key) => {
+    if (key === "department") return a.department.name;
+    if (key === "role") return roleLabel(a.roleType);
+    if (key === "user") return a.user.name;
+    return a.user.email;
+  });
 
   // Notes_6: fields are (1) Username - searchable from the employee list,
   // (2) Department - defaults to that user's own department but is
@@ -176,18 +202,19 @@ export function RoleAssignmentsTab() {
       </div>
       {assignMutation.isError && <div className="text-xs text-red-600">{(assignMutation.error as any)?.response?.data?.error ?? "Could not assign this role."}</div>}
 
+      <TableFilter value={filterText} onChange={setFilterText} placeholder="Filter assignments…" count={sorted.length} total={assignments.length} />
       <table className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
         <thead className="bg-emerald-50 text-left text-xs tracking-wide text-emerald-800">
           <tr>
-            <th className="px-3 py-2">Department</th>
-            <th className="px-3 py-2">Role</th>
-            <th className="px-3 py-2">User</th>
-            <th className="px-3 py-2">Email</th>
+            <SortableHeader label="Department" sortKey="department" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="px-3 py-2" />
+            <SortableHeader label="Role" sortKey="role" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="px-3 py-2" />
+            <SortableHeader label="User" sortKey="user" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="px-3 py-2" />
+            <SortableHeader label="Email" sortKey="email" activeKey={sortKey} dir={sortDir} onToggle={toggle} className="px-3 py-2" />
             <th className="px-3 py-2" />
           </tr>
         </thead>
         <tbody>
-          {sortedAssignments.map((a) => (
+          {sorted.map((a) => (
             <tr key={a.id} className="border-t border-slate-100">
               <td className="px-3 py-2">{a.department.name}</td>
               <td className="px-3 py-2">{roleLabel(a.roleType)}</td>

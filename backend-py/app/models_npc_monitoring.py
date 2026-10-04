@@ -96,6 +96,9 @@ class NpcMonitoringIo(Phase3Model, table=True):
     # vs Monitoring tab Budget PHP 4,560,714.29, same project) - `budget`
     # remains the row's own IO Budget for its own column, unaffected.
     carry_over_revised_amount: Optional[float] = Field(default=None)
+    # The Monitoring tab's own "Group" column (e.g. "Malls Improvements",
+    # "Parking") - shown in the NPC table where Location used to be.
+    group_name: Optional[str] = Field(default=None)
     # The Monitoring tab's own "YTD Forecast" block (one cumulative-through-
     # that-month figure per month, columns 48-59) - despite the "Forecast"
     # label, its value for an already-elapsed month matches this same row's

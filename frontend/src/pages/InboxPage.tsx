@@ -48,7 +48,7 @@ function MyReturnedRequestsSection() {
                 <div className="font-medium text-emerald-800">{requestLineDisplay(r).name}</div>
                 <div className="text-xs text-slate-500">
                   {r.department.name}
-                  {requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · {r.proposedAmount.toLocaleString()}
+                  {requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · {r.proposedAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </div>
               </div>
               <StatusBadge stage={r.currentStage} />
@@ -631,7 +631,7 @@ function ReviewHistorySection() {
     ...budgetHistory.map((r) => ({
       id: `budget-${r.id}`,
       label: requestLineDisplay(r).name,
-      sublabel: `${r.department.name}${requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · ${r.proposedAmount.toLocaleString()}`,
+      sublabel: `${r.department.name}${requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · ${r.proposedAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
       link: `/requests/${r.id}`,
       decision: r.myDecision,
     })),
@@ -858,7 +858,7 @@ export function InboxPage() {
                       </Link>
                       <div className="text-xs text-slate-500">
                         {r.department.name}
-                        {requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · {r.proposedAmount.toLocaleString()} · by {r.createdBy.name}
+                        {requestLineDisplay(r).ownerDepartmentName ? ` → ${requestLineDisplay(r).ownerDepartmentName}` : ""} · {r.proposedAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })} · by {r.createdBy.name}
                       </div>
                       {r.bulkUploadBatch && (
                         <button

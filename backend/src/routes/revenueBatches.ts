@@ -96,7 +96,7 @@ async function assertBoardBudgetTiesOut(fiscalYear: number, sbu: Sbu, grandTotal
   if (Math.round(Math.abs(board.amount - grandTotal) * 100) / 100 > 0.01) {
     throw new HttpError(
       400,
-      `The template's total (₱${grandTotal.toLocaleString()}) does not tie up with the ${fiscalYear} Board-Approved Budget for this SBU (₱${board.amount.toLocaleString()}). Fix the template and re-upload.`
+      `The template's total (₱${grandTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}) does not tie up with the ${fiscalYear} Board-Approved Budget for this SBU (₱${board.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}). Fix the template and re-upload.`
     );
   }
   return board;

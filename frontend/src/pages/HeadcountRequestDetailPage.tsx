@@ -1,8 +1,10 @@
-import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type AdditionalHeadcountRequest } from "../api/client";
 import { StatusBadge } from "../components/StatusBadge";
 import { SectionLabel } from "../components/TabBar";
+import { useAuth } from "../context/AuthContext";
 
 // Notes_11: "All requests should be clickable and will be directed to
 // 'Details' page." Additional Manpower requests had no detail page at all —
@@ -12,12 +14,46 @@ import { SectionLabel } from "../components/TabBar";
 export function HeadcountRequestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
+  const [actionError, setActionError] = useState<string | null>(null);
   const { data: request, isLoading } = useQuery({
     queryKey: ["headcount-request", id],
     queryFn: async () => (await api.get<AdditionalHeadcountRequest>(`/additional-headcount/${id}`)).data,
   });
 
+  // Drafts can only be submitted or cancelled by their creator (the backend
+  // enforces this too); everyone else just sees the read-only view.
+  const isDraftCreator = request?.currentStage === "DRAFT" && currentUser?.email === request.createdBy.email;
+  const invalidateHeadcount = () => {
+    queryClient.invalidateQueries({ queryKey: ["additional-headcount"] });
+    queryClient.invalidateQueries({ queryKey: ["headcount-request", id] });
+  };
+
+  const submitMutation = useMutation({
+    mutationFn: async () => (await api.post<AdditionalHeadcountRequest>(`/additional-headcount/${id}/submit`)).data,
+    onSuccess: () => {
+      setActionError(null);
+      invalidateHeadcount();
+    },
+    onError: (err: any) => setActionError(err.response?.data?.error ?? "Failed to submit request."),
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async () => (await api.post(`/additional-headcount/${id}/cancel`)).data,
+    onSuccess: () => {
+      invalidateHeadcount();
+      navigate("/requests/mine");
+    },
+    onError: (err: any) => setActionError(err.response?.data?.error ?? "Failed to cancel draft."),
+  });
+
   if (isLoading || !request) return <div className="text-sm text-slate-400">Loading…</div>;
+
+  const isBusy = submitMutation.isPending || cancelMutation.isPending;
+  const onCancel = () => {
+    if (window.confirm("Cancel this draft? It will be kept as Cancelled and can't be submitted.")) cancelMutation.mutate();
+  };
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -29,23 +65,50 @@ export function HeadcountRequestDetailPage() {
       </button>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-bold tracking-tight text-slate-800">
-          {request.position} (Rank {request.rank})
-        </h1>
-        <StatusBadge stage={request.currentStage} />
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-lg font-bold tracking-tight text-slate-800">
+            {request.position} (Rank {request.rank})
+          </h1>
+          <StatusBadge stage={request.currentStage} />
+        </div>
+        {isDraftCreator && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => submitMutation.mutate()}
+              disabled={isBusy}
+              className="rounded-md bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              Submit for Approval
+            </button>
+            <button
+              onClick={onCancel}
+              disabled={isBusy}
+              className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Cancel Request
+            </button>
+          </div>
+        )}
       </div>
+      {actionError && <div className="rounded bg-red-50 p-2 text-sm text-red-700">{actionError}</div>}
 
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
-        <Field label="Reference Code" value={request.code} accent />
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
+        <Field label="Reference Code" value={request.code ?? "Assigned on submit"} accent={Boolean(request.code)} />
         <Field label="Originating Department" value={request.department.name} />
         <Field label="Company" value={request.company.code} />
         <Field label="Estimated Hire Date" value={new Date(request.estimatedHireDate).toLocaleDateString()} />
+        <Field label="Department Head / Approver" value={request.departmentHead?.name ?? "—"} />
         <Field label="Created By" value={request.createdBy.name} />
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm">
         <SectionLabel>Justification</SectionLabel>
         <p className="text-slate-600">{request.justification}</p>
+        {isDraftCreator && (
+          <Link to={`/requests/new?tab=headcount&draft=${request.id}`} className="mt-3 inline-block text-xs font-medium text-emerald-700 hover:underline">
+            Edit draft
+          </Link>
+        )}
       </div>
 
       {(request.office365AccountRequest || request.mobilePhoneBudgetRequest) && (

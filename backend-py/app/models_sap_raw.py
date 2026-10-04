@@ -106,3 +106,35 @@ class SapSalrRaw(Phase2Model, table=True):
     committed: float
     allotted: float
     available: float
+
+
+class SapGaePastActualRaw(Phase2Model, table=True):
+    """sap_gae_past_actual_raw - prior-year GAE actuals per (cost center, GL,
+    month), loaded from "Budgeting System_GAE Past Years Actual.xlsx" (its
+    2025A-01..12 columns). Used by the GAE report's Last Year comparisons.
+    """
+
+    __tablename__ = "sap_gae_past_actual_raw"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    cost_center: str = Field(index=True)
+    gl_account: str = Field(index=True)
+    fiscal_year: int = Field(index=True)
+    month: int  # 1-12
+    amount: float
+
+
+class GaeCcGlMapping(Phase2Model, table=True):
+    """gae_cc_gl_mapping - the GAE report's CC-GL Mapping tab, one row per
+    (cost center, GL account): Manpower/Non-Manpower flag, Main Report type
+    and Detailed Report sub type.
+    """
+
+    __tablename__ = "gae_cc_gl_mapping"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    cost_center: str = Field(index=True)
+    gl_account: str = Field(index=True)
+    manpower: str  # "Manpower" | "Non-Manpower"
+    type: str
+    sub_type: str = ""

@@ -1,6 +1,7 @@
 import { HeadcountRequestStage, RequestStage, RoleType, Sbu } from "@prisma/client";
 import { requestSbu } from "../services/approvalChain";
 import { prisma } from "../prisma";
+import { HR_ANALYST_REVIEWER_EMAIL, HR_HEAD_APPROVER_EMAIL } from "./headcountHrHead";
 
 // Reverse of budgetRequests.ts's STAGE_BY_ROLE (role -> stage) — given a
 // stage, which role currently owns it. Department Heads are scoped by the
@@ -83,15 +84,22 @@ export async function resolveBudgetRequestPendingReviewers(request: {
 export async function resolveHeadcountRequestPendingReviewers(request: {
   currentStage: HeadcountRequestStage;
   departmentId: string;
+  departmentHeadId: string | null;
 }): Promise<string[]> {
   switch (request.currentStage) {
-    case HeadcountRequestStage.DEPT_HEAD_REVIEW:
-      return reviewerNamesForRole(RoleType.DEPARTMENT_HEAD, request.departmentId);
-    case HeadcountRequestStage.HR_ANALYST_REVIEW:
-      return reviewerNamesForRole(RoleType.HR_ANALYST, null);
+    case HeadcountRequestStage.DEPT_HEAD_REVIEW: {
+      // The Department Head / Approver the requester picked (not a role lookup).
+      if (!request.departmentHeadId) return [];
+      const picked = await prisma.user.findUnique({ where: { id: request.departmentHeadId }, select: { name: true } });
+      return picked ? [picked.name] : [];
+    }
+    case HeadcountRequestStage.HR_ANALYST_REVIEW: {
+      const analyst = await prisma.user.findUnique({ where: { email: HR_ANALYST_REVIEWER_EMAIL }, select: { name: true } });
+      return analyst ? [analyst.name] : [];
+    }
     case HeadcountRequestStage.HR_HEAD_REVIEW: {
-      const hrDeptId = await humanResourcesDeptId();
-      return hrDeptId ? reviewerNamesForRole(RoleType.CENTRALIZED_DEPARTMENT_HEAD, hrDeptId) : [];
+      const hrHead = await prisma.user.findUnique({ where: { email: HR_HEAD_APPROVER_EMAIL }, select: { name: true } });
+      return hrHead ? [hrHead.name] : [];
     }
     default:
       return [];

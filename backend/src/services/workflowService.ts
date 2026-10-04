@@ -90,7 +90,7 @@ export async function submitRequest(requestId: string) {
   if (docThreshold && request.proposedAmount > docThreshold.amount && request.attachments.length === 0) {
     throw new HttpError(
       400,
-      `Supporting attachments are mandatory for requests over PHP ${docThreshold.amount.toLocaleString()}.`
+      `Supporting attachments are mandatory for requests over PHP ${docThreshold.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}.`
     );
   }
 

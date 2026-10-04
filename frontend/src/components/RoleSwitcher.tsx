@@ -8,8 +8,8 @@ import { SearchableSelect } from "./SearchableSelect";
 // List" file exactly.
 const ROLE_LABELS: Record<string, string> = {
   BUDGET_OFFICER: "Budget Officer",
-  BCA_HEAD: "BC&A Head",
-  DEPARTMENT_HEAD: "Department Approver",
+  BCA_HEAD: "BCA Head",
+  DEPARTMENT_HEAD: "Department Head",
   DEPARTMENT_PREPARER: "Department Preparer",
   // "Budgeting System_Approval Workflow"'s "Centralized Department Requestor" -
   // renamed from "...Preparer" since this role both creates GAE requests for
@@ -17,10 +17,10 @@ const ROLE_LABELS: Record<string, string> = {
   // Requestor's own request gets forwarded through.
   CENTRALIZED_BUDGET_PREPARER: "Centralized Department Requestor/Reviewer",
   CENTRALIZED_FIRST_LEVEL_REVIEWER: "Centralized Department Reviewer",
-  CENTRALIZED_DEPARTMENT_HEAD: "Centralized Department Approver",
+  CENTRALIZED_DEPARTMENT_HEAD: "Centralized Department Head",
   CFO: "CFO",
   CEO: "CEO",
-  HR_ANALYST: "Human Resources Manpower Preparer",
+  HR_ANALYST: "Manpower Preparer",
   // Phase 3 Budget Transfer & Reallocation — SBU-scoped role-type strings
   // stay BU_*, only the displayed label changed to "SBU ..." per the
   // workflow revision.
@@ -117,6 +117,7 @@ export function RoleSwitcher() {
             value={quickUserId}
             onChange={quickLogin}
             disabled={submitting}
+            hideUntilTyped
           />
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <div className="h-px flex-1 bg-slate-200" />

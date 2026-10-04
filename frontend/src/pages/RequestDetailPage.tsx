@@ -168,7 +168,7 @@ export function RequestDetailPage() {
         )}
       {submitError && <div className="rounded bg-red-50 p-3 text-sm text-red-700">{submitError}</div>}
 
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
         <Field label="Originating Department" value={request.department.name} />
         {line.ownerDepartmentName && <Field label="Owning (Centralized) Department" value={line.ownerDepartmentName} />}
         <Field label="GL-CC" value={line.glCc} />
@@ -203,7 +203,7 @@ export function RequestDetailPage() {
                   }}
                 />
               ) : (
-                <div className="mt-1 font-semibold tabular-nums text-slate-700">{request.monthlyAmounts[i].toLocaleString()}</div>
+                <div className="mt-1 font-semibold tabular-nums text-slate-700">{request.monthlyAmounts[i].toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
               )}
             </div>
           ))}

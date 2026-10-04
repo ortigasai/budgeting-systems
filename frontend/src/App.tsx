@@ -22,6 +22,8 @@ import { InternalOrderRequestsPage } from "./pages/InternalOrderRequestsPage";
 import { InternalOrderDetailPage } from "./pages/InternalOrderDetailPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { RequireReportAccess } from "./components/RequireReportAccess";
+import { ReportsTrendPage } from "./pages/ReportsTrendPage";
+import { NpcReportPage } from "./pages/NpcReportPage";
 import { UploadStatusStack } from "./components/UploadStatusStack";
 
 export default function App() {
@@ -98,6 +100,22 @@ export default function App() {
           element={
             <RequireReportAccess>
               <ReportsPage />
+            </RequireReportAccess>
+          }
+        />
+        <Route
+          path="reports/npc"
+          element={
+            <RequireReportAccess>
+              <NpcReportPage />
+            </RequireReportAccess>
+          }
+        />
+        <Route
+          path="reports/trend"
+          element={
+            <RequireReportAccess>
+              <ReportsTrendPage />
             </RequireReportAccess>
           }
         />

@@ -233,19 +233,19 @@ export function Step5DashboardPage() {
             <div className="text-xs font-semibold tracking-wide text-slate-500">
               {FISCAL_YEAR} Board-Approved Budget{usesSbuBreakdown && sbuFilter !== "ALL" ? ` — ${SBU_OPTIONS.find((o) => o.value === sbuFilter)?.label}` : ""}
             </div>
-            <div className="mt-1 text-xl font-bold text-slate-800">{boardAmount.toLocaleString()}</div>
+            <div className="mt-1 text-xl font-bold text-slate-800">{boardAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
           </div>
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
             <div className="text-xs font-semibold tracking-wide text-emerald-700">{FISCAL_YEAR} Total Proposed Budget</div>
-            <div className="mt-1 text-xl font-bold text-emerald-800">{totalProposed.toLocaleString()}</div>
+            <div className="mt-1 text-xl font-bold text-emerald-800">{totalProposed.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
             <div className="mt-0.5 text-[11px] text-emerald-700/70">
-              {totalPendingProposed.toLocaleString()} pending + {totalApproved.toLocaleString()} approved
+              {totalPendingProposed.toLocaleString(undefined, { maximumFractionDigits: 0 })} pending + {totalApproved.toLocaleString(undefined, { maximumFractionDigits: 0 })} approved
             </div>
           </div>
           <div className={`rounded-lg border p-4 ${variance < 0 ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>
             <div className={`text-xs font-semibold tracking-wide ${variance < 0 ? "text-red-700" : "text-amber-700"}`}>Variance</div>
             <div className={`mt-1 text-xl font-bold ${variance < 0 ? "text-red-700" : "text-amber-800"}`}>
-              {variance.toLocaleString()} ({variancePct.toFixed(1)}%)
+              {variance.toLocaleString(undefined, { maximumFractionDigits: 0 })} ({variancePct.toFixed(1)}%)
             </div>
           </div>
         </div>
@@ -263,7 +263,7 @@ export function Step5DashboardPage() {
                 {SBU_OPTIONS.map((o) => (
                   <tr key={o.value} className="border-t border-slate-100">
                     <td className="py-1 pr-3">{o.label}</td>
-                    <td className="py-1 pr-3">{(latestFor(history, category, o.value)?.amount ?? 0).toLocaleString()}</td>
+                    <td className="py-1 pr-3">{(latestFor(history, category, o.value)?.amount ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                   </tr>
                 ))}
               </tbody>
@@ -302,7 +302,7 @@ export function Step5DashboardPage() {
                       {requestLineDisplay(r).name}
                     </Link>
                   </td>
-                  <td className="px-3 py-2">{r.proposedAmount.toLocaleString()}</td>
+                  <td className="px-3 py-2">{r.proposedAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                   <td className="px-3 py-2">
                     <input
                       type="number"
@@ -314,7 +314,7 @@ export function Step5DashboardPage() {
                       }}
                     />
                   </td>
-                  <td className="px-3 py-2 font-semibold text-slate-700">{(r.proposedAmount - r.budgetCutAmount).toLocaleString()}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-700">{(r.proposedAmount - r.budgetCutAmount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                   <td className="px-3 py-2">{r.isOverBudget && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Over-budget / Requires Realignment</span>}</td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-2">

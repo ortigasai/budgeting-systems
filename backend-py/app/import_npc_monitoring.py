@@ -72,6 +72,7 @@ MONITORING_FIRST_DATA_ROW = 7
 COL_AUFNR = 1
 COL_IO_DESCRIPTION = 2
 COL_SBU2 = 4
+COL_GROUP = 5
 COL_BUDGET_SOURCE_CODE = 8
 COL_BUDGET = 26
 COL_ACTUAL = 27
@@ -272,9 +273,9 @@ def import_sbu_tab(
     # of those net changes' absolute values instead, which stays
     # informative even when the SBU-wide net is zero.
     net_nonzero = {code: v for code, v in transfer_by_code.items() if v != 0}
-    transfer_note = f", Budget Transfer changed {len(net_nonzero)} project(s)' NPC Budget by PHP {sum(abs(v) for v in net_nonzero.values()):,.2f} total" if net_nonzero else ""
+    transfer_note = f", Budget Transfer changed {len(net_nonzero)} project(s)' NPC Budget by PHP {sum(abs(v) for v in net_nonzero.values()):,.0f} total" if net_nonzero else ""
     if unattributed_transfer_total:
-        transfer_note += f" (PHP {unattributed_transfer_total:,.2f} in Budget Transfer couldn't be attributed to any project - left out)"
+        transfer_note += f" (PHP {unattributed_transfer_total:,.0f} in Budget Transfer couldn't be attributed to any project - left out)"
     print(f"  [{tab_name}] {len(projects)} project(s) imported{transfer_note}.")
     return projects, carry_over_revised
 
@@ -306,7 +307,7 @@ def import_hr_pooled_project(wb, fiscal_year: int, source_file: str) -> list[Npc
         revised_amount=float(total),
         source_file=source_file,
     )
-    print(f"  [HR] 1 pooled project imported (PHP {total:,.2f}).")
+    print(f"  [HR] 1 pooled project imported (PHP {total:,.0f}).")
     return [project]
 
 
@@ -350,6 +351,7 @@ def import_monitoring_ios(ws, fiscal_year: int, source_file: str) -> list[NpcMon
                 allotted=float(ws.cell(row=r, column=COL_ALLOTTED).value or 0),
                 available=float(ws.cell(row=r, column=COL_AVAILABLE).value or 0),
                 ytd_actual_by_month=ytd_actual_by_month,
+                group_name=str(ws.cell(row=r, column=COL_GROUP).value or "").strip() or None,
                 source_file=source_file,
             )
         )

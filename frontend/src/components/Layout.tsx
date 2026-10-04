@@ -39,6 +39,33 @@ const ICONS = {
   dashFlow: "M4 6h16M4 12h10M4 18h7M17 15l3 3-3 3",
 };
 
+// Budget Report & Analysis's own menu: each item is a view of the same Reports page
+// (or the separate 5-Year Trend page). Active state comes from the URL, not NavLink's path match.
+const REPORT_GROUPS: { title: string; items: { id: string; label: string; to: string }[] }[] = [
+  {
+    title: "GAE",
+    items: [
+      { id: "budget-actual", label: "Budget, Actual, Forecast YTD/Annual Comparisons", to: "/reports?comparison=budget-actual" },
+      { id: "yoy-actual", label: "Last Year Comparisons", to: "/reports?comparison=yoy-actual" },
+      { id: "monthly-comparison", label: "Monthly Comparisons", to: "/reports?comparison=monthly-comparison" },
+      { id: "quarterly-comparison", label: "Quarterly Comparisons", to: "/reports?comparison=quarterly-comparison" },
+      { id: "trend", label: "5-Year Trend", to: "/reports/trend" },
+    ],
+  },
+  {
+    title: "NPC",
+    items: [{ id: "npc", label: "NPC Report", to: "/reports/npc" }],
+  },
+];
+
+function ReportNavItem({ to, active, children }: { to: string; active: boolean; children: ReactNode }) {
+  return (
+    <NavLink to={to} className={() => `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${active ? "bg-emerald-700 text-white shadow-sm shadow-emerald-700/30" : "text-slate-600 hover:bg-emerald-50 hover:text-emerald-900"}`}>
+      {children}
+    </NavLink>
+  );
+}
+
 function NavItem({ to, end, icon, children }: { to: string; end?: boolean; icon: keyof typeof ICONS; children: ReactNode }) {
   return (
     <NavLink to={to} end={end} className={linkClass}>
@@ -391,7 +418,7 @@ function UtilizationSidebarNav() {
   const view = searchParams.get("view");
   const isUtilizationPath = location.pathname === "/utilization";
   const isOperatingExpensesActive = isUtilizationPath && view !== "npc";
-  const [open, setOpen] = useState(isOperatingExpensesActive);
+  const [open, setOpen] = useState(true);
   useLayoutEffect(() => {
     if (isOperatingExpensesActive) setOpen(true);
   }, [isOperatingExpensesActive]);
@@ -490,6 +517,7 @@ export function Layout() {
   // shown here can never drift from what the menu itself says.
   const currentPhase = phaseForPath(location.pathname);
 
+  const activeReportView = location.pathname === "/reports/trend" ? "trend" : location.pathname === "/reports/npc" ? "npc" : (new URLSearchParams(location.search).get("comparison") ?? "budget-actual");
   const isBudgetOfficer = hasRole("BUDGET_OFFICER");
   const isReviewer = hasRole("DEPARTMENT_HEAD") || hasRole("CENTRALIZED_FIRST_LEVEL_REVIEWER") || hasRole("CENTRALIZED_DEPARTMENT_HEAD") || hasRole("BCA_HEAD") || hasRole("CFO") || isBudgetOfficer;
   // Spec item 16 - Revenue's 4-stage chain reuses BCA_HEAD/BUDGET_OFFICER
@@ -572,16 +600,28 @@ export function Layout() {
 
   if (!currentUser) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100">
-        <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-800 text-lg font-bold text-white">₱</div>
-            <div className="leading-tight">
-              <div className="text-base font-bold tracking-tight text-slate-900">Budgeting System</div>
-              <div className="text-[11px] font-medium tracking-wider text-slate-500">Ortigas Group</div>
-            </div>
+      <div className="flex min-h-screen flex-col md:flex-row">
+        <div className="flex flex-col justify-center gap-10 bg-gradient-to-br from-[#15603a] to-[#052e1a] p-10 text-white md:w-[38%] md:min-w-[320px] md:max-w-[560px]">
+          <div>
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-white text-2xl font-bold text-emerald-800">₱</div>
+            <div className="mt-5 text-2xl font-bold tracking-tight">Budgeting System</div>
+            <div className="mt-1 text-sm font-medium tracking-wider text-emerald-200">Ortigas Group</div>
+            <p className="mt-6 text-sm leading-relaxed text-emerald-100">Set, track, and report the annual budget in one place.</p>
           </div>
-          <RoleSwitcher />
+          <div>
+            <div className="mb-4 text-xs font-medium text-emerald-300">Modules</div>
+            <ol className="space-y-3 text-sm text-emerald-50">
+              <li className="flex items-center gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">1</span>Annual Budget Setting</li>
+              <li className="flex items-center gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">2</span>Budget Utilization Tracking</li>
+              <li className="flex items-center gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">3</span>Budget Transfer &amp; Reallocation</li>
+              <li className="flex items-center gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">4</span>Budget Report &amp; Analysis</li>
+            </ol>
+          </div>
+        </div>
+        <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-emerald-50 p-8">
+          <div className="relative w-full max-w-md rounded-xl border border-emerald-200 bg-white p-8 shadow-sm">
+            <RoleSwitcher />
+          </div>
         </div>
       </div>
     );
@@ -591,8 +631,8 @@ export function Layout() {
   // every phase) - the sidebar below it is nav-only, not a second place
   // carrying the same branding.
   return (
-    <div className="flex h-screen flex-col bg-slate-100">
-      <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-emerald-800 to-emerald-600 px-6 py-4">
+    <div className="flex h-screen flex-col bg-[#f5faf7]">
+      <div className="flex shrink-0 items-center justify-between bg-gradient-to-r from-[#15603a] to-[#052e1a] px-6 py-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15 text-lg font-bold text-white ring-1 ring-white/30">₱</div>
           <div className="leading-tight">
@@ -622,10 +662,32 @@ export function Layout() {
             (the dashboard's own control bar replaced the old 4-link
             sub-menu), so it gets no sidebar at all now, same as any other
             single-page phase would. */}
-        {!isAtPhaseMenu && (isAdminConsole || currentPhase.number === 1 || currentPhase.number === 2 || currentPhase.number === 3) && (
-          <aside className="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-emerald-900/10 bg-white">
+        {!isAtPhaseMenu && (isAdminConsole || currentPhase.number === 1 || currentPhase.number === 2 || currentPhase.number === 3 || currentPhase.number === 4) && (
+          <aside className="sidebar-dark flex w-64 shrink-0 flex-col overflow-y-auto border-r border-emerald-900/10 bg-gradient-to-b from-[#15603a] to-[#052e1a]">
             <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
               {isAdminConsole && <AdminConsoleSidebarNav />}
+              {!isAdminConsole && currentPhase.number === 4 && (
+                <>
+                  <CollapsibleNavGroup to="/reports" icon="reports" label="GAE" defaultOpen>
+                    <div className="ml-7 mt-1 flex flex-col gap-0.5 border-l border-emerald-100 pl-3">
+                      {REPORT_GROUPS[0].items.map((v) => (
+                        <NavLink key={v.id} to={v.to} className={subLinkClass(activeReportView === v.id)}>
+                          {v.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  </CollapsibleNavGroup>
+                  <CollapsibleNavGroup to="/reports/npc" icon="reports" label="NPC" defaultOpen>
+                    <div className="ml-7 mt-1 flex flex-col gap-0.5 border-l border-emerald-100 pl-3">
+                      {REPORT_GROUPS[1].items.map((v) => (
+                        <NavLink key={v.id} to={v.to} className={subLinkClass(activeReportView === v.id)}>
+                          {v.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  </CollapsibleNavGroup>
+                </>
+              )}
               {!isAdminConsole && currentPhase.number === 1 && (
                 <>
                   <NavItem to="/phase1" icon="home">

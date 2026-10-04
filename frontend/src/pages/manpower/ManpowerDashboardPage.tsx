@@ -199,7 +199,7 @@ export function ManpowerDashboardPage() {
   }, [runPollData]);
 
   const runInProgress = runPollData?.status === "running";
-  const lastRunLabel = runPollData?.lastSuccessAt ? `Last synced ${timeAgo(runPollData.lastSuccessAt)}` : runPollData && runPollData.status !== "idle" ? "Never synced successfully yet" : null;
+  const lastRunLabel = runPollData?.lastSuccessAt ? `Last synced ${new Date(runPollData.lastSuccessAt).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}` : runPollData && runPollData.status !== "idle" ? "Never synced successfully yet" : null;
   const submitMutation = useMutation({
     mutationFn: async () => (await api.post("/manpower/submit", { fiscalYear: FISCAL_YEAR })).data,
     onSuccess: invalidateAll,

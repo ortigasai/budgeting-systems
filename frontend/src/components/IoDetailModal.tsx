@@ -27,7 +27,7 @@ interface IoDetail {
   requestCostCenter: string | null;
 }
 
-const peso = (n: number | null) => (n === null || n === undefined ? "—" : `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+const peso = (n: number | null) => (n === null || n === undefined ? "—" : `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
 
 function Field({ label, value }: { label: string; value: string | null }) {
   return (
@@ -102,7 +102,7 @@ export function IoDetailModal({ aufnr, fiscalYear, onClose }: { aufnr: string; f
 
             <div>
               <div className="mb-2 text-xs font-semibold tracking-wide text-emerald-800">SAP figures (S_ALR_87013019)</div>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <div className="grid grid-cols-5 gap-4">
                 <Field label="Budget" value={peso(data.sapBudget)} />
                 <Field label="Actual" value={peso(data.sapActual)} />
                 <Field label="Commitment" value={peso(data.sapCommitted)} />

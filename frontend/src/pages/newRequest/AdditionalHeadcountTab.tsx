@@ -1,10 +1,13 @@
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useFiscalYear } from "../../lib/fiscalCycle";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type AdditionalHeadcountRequest, type Company } from "../../api/client";
 import { SectionLabel } from "../../components/TabBar";
+import { StatusBadge } from "../../components/StatusBadge";
 import { SearchableSelect } from "../../components/SearchableSelect";
+import { ApproverPicker } from "../../components/ApproverPicker";
 import { PageHeader } from "../../components/PageHeader";
 
 interface Position {
@@ -46,8 +49,10 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
     companyId: "",
     estimatedHireDate: "",
     justification: "",
+    departmentHeadId: "",
   });
   const [created, setCreated] = useState<AdditionalHeadcountRequest | null>(null);
+  const [draftId, setDraftId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { currentUser } = useAuth();
   const { targetYear: FISCAL_YEAR } = useFiscalYear();
@@ -63,36 +68,193 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
     () => new Set(companies.filter((c) => c.code === "OCLP_PROJECT" || c.code === "OLC_PROJECT").map((c) => c.id)),
     [companies]
   );
-  const companyOptions = form.rank === "1" ? companies.filter((c) => projectCompanyIds.has(c.id)) : companies;
+  const outsourcedCompanyId = useMemo(() => companies.find((c) => c.code === "OUTSOURCED")?.id ?? "", [companies]);
+  const isRankAboveOutsourced = Number(form.rank) >= 3;
+  const companyOptions = form.rank === "1"
+    ? companies.filter((c) => projectCompanyIds.has(c.id))
+    : form.rank === "2"
+      ? companies.filter((c) => c.id === outsourcedCompanyId)
+    : isRankAboveOutsourced
+      ? companies.filter((c) => !projectCompanyIds.has(c.id) && c.id !== outsourcedCompanyId)
+      : companies;
 
   const handleRankChange = (rank: string) => {
     let companyId = form.companyId;
     if (rank === "1") {
       if (!projectCompanyIds.has(companyId)) companyId = "";
     } else if (rank === "2") {
-      companyId = companies.find((c) => c.code === "OUTSOURCED")?.id ?? companyId;
+      companyId = outsourcedCompanyId || companyId;
+    } else if (Number(rank) >= 3 && (projectCompanyIds.has(companyId) || companyId === outsourcedCompanyId)) {
+      companyId = "";
     }
     setForm({ ...form, rank, companyId });
   };
 
-  const createMutation = useMutation({
-    mutationFn: async () =>
-      (
-        await api.post<AdditionalHeadcountRequest>("/additional-headcount", {
-          position: form.position,
-          rank: Number(form.rank),
-          companyId: form.companyId,
-          estimatedHireDate: new Date(form.estimatedHireDate).toISOString(),
-          justification: form.justification,
-        })
-      ).data,
+  // The form is saved as a DRAFT (no reference code yet) and only gets a code
+  // and enters the approval chain on submit. Saving again updates the same draft.
+  const payloadFromForm = () => ({
+    position: form.position,
+    rank: Number(form.rank),
+    companyId: form.companyId,
+    estimatedHireDate: new Date(form.estimatedHireDate).toISOString(),
+    justification: form.justification,
+    departmentHeadId: form.departmentHeadId,
+  });
+
+  const saveDraft = async (): Promise<AdditionalHeadcountRequest> =>
+    draftId
+      ? (await api.put<AdditionalHeadcountRequest>(`/additional-headcount/${draftId}`, payloadFromForm())).data
+      : (await api.post<AdditionalHeadcountRequest>("/additional-headcount", payloadFromForm())).data;
+
+  const invalidateRequests = () => queryClient.invalidateQueries({ queryKey: ["additional-headcount"] });
+
+  // Saving a draft moves to the "Draft created" screen, where Submit lives,
+  // mirroring GAE New Request.
+  const saveDraftMutation = useMutation({
+    mutationFn: saveDraft,
     onSuccess: (data) => {
+      setDraftId(data.id);
       setCreated(data);
       setError(null);
-      queryClient.invalidateQueries({ queryKey: ["additional-headcount", "my-requests"] });
+      invalidateRequests();
     },
-    onError: (err: any) => setError(err.response?.data?.error ?? "Failed to create request."),
+    onError: (err: any) => setError(err.response?.data?.error ?? "Failed to save draft."),
   });
+
+  const submitMutation = useMutation({
+    mutationFn: async () => (await api.post<AdditionalHeadcountRequest>(`/additional-headcount/${created!.id}/submit`)).data,
+    onSuccess: (data) => {
+      setCreated(data);
+      setDraftId(null);
+      setError(null);
+      invalidateRequests();
+    },
+    onError: (err: any) => setError(err.response?.data?.error ?? "Failed to submit request."),
+  });
+
+  // "Edit draft" from the draft's detail page links here with ?draft=<id>;
+  // open that draft on the Draft screen once, then drop the param.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const draftParam = searchParams.get("draft");
+  const { data: linkedDraft } = useQuery({
+    queryKey: ["additional-headcount", "draft", draftParam],
+    enabled: !!draftParam,
+    queryFn: async () => (await api.get<AdditionalHeadcountRequest>(`/additional-headcount/${draftParam}`)).data,
+  });
+  useEffect(() => {
+    if (!linkedDraft) return;
+    openDraft(linkedDraft);
+    setSearchParams({ tab: "headcount" }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedDraft]);
+
+  const cancelMutation = useMutation({
+    mutationFn: async () => (await api.post(`/additional-headcount/${created!.id}/cancel`)).data,
+    onSuccess: () => {
+      resetForm();
+      invalidateRequests();
+    },
+    onError: (err: any) => setError(err.response?.data?.error ?? "Failed to cancel draft."),
+  });
+
+  const openDraft = (draft: AdditionalHeadcountRequest) => {
+    setDraftId(draft.id);
+    setCreated(draft);
+    setError(null);
+  };
+
+  const editDraft = () => {
+    if (!created) return;
+    setForm({
+      position: created.position,
+      rank: String(created.rank),
+      companyId: created.companyId,
+      estimatedHireDate: created.estimatedHireDate.slice(0, 10),
+      justification: created.justification,
+      departmentHeadId: created.departmentHeadId ?? "",
+    });
+    setCreated(null);
+    setError(null);
+  };
+
+  const resetForm = () => {
+    setCreated(null);
+    setDraftId(null);
+    setForm({ position: "", rank: "", companyId: "", estimatedHireDate: "", justification: "", departmentHeadId: "" });
+  };
+
+  const isBusy = saveDraftMutation.isPending || submitMutation.isPending || cancelMutation.isPending;
+
+  if (created?.currentStage === "DRAFT") {
+    const onCancel = () => {
+      if (window.confirm("Cancel this draft? It will be kept as Cancelled and can't be submitted.")) cancelMutation.mutate();
+    };
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-lg font-bold tracking-tight text-slate-800">
+              {created.position} (Rank {created.rank})
+            </h1>
+            <StatusBadge stage={created.currentStage} />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => submitMutation.mutate()}
+              disabled={isBusy}
+              className="rounded-md bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              Submit for Approval
+            </button>
+            <button
+              onClick={onCancel}
+              disabled={isBusy}
+              className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Cancel Request
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
+          <div>
+            <div className="text-xs text-slate-500">Originating Department</div>
+            <div className="font-medium">{created.department.name}</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Company</div>
+            <div className="font-medium">{created.company.code}</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Estimated Hire Date</div>
+            <div className="font-medium">{new Date(created.estimatedHireDate).toLocaleDateString()}</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Reference Code</div>
+            <div className="text-slate-500">Assigned on submit</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Department Head / Approver</div>
+            <div className="font-medium">{created.departmentHead?.name ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Created By</div>
+            <div className="font-medium">{created.createdBy.name}</div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm">
+          <SectionLabel>Justification</SectionLabel>
+          <p className="text-slate-600">{created.justification}</p>
+          <button type="button" onClick={editDraft} disabled={isBusy} className="mt-3 text-xs font-medium text-emerald-700 hover:underline disabled:opacity-50">
+            Edit draft
+          </button>
+        </div>
+
+        {error && <div className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</div>}
+      </div>
+    );
+  }
 
   if (created) {
     return (
@@ -101,10 +263,7 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
           subtitle={<span className="font-medium text-slate-700">Additional Manpower Request submitted</span>}
           actions={
             <button
-              onClick={() => {
-                setCreated(null);
-                setForm({ position: "", rank: "", companyId: "", estimatedHireDate: "", justification: "" });
-              }}
+              onClick={resetForm}
               className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
             >
               Submit another
@@ -138,24 +297,24 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
     );
   }
 
-  const canSubmit = form.position && form.rank && form.companyId && form.estimatedHireDate && form.justification;
+  const isFormComplete = Boolean(form.departmentHeadId && form.position && form.rank && form.companyId && form.estimatedHireDate && form.justification);
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
-      <div ref={setFrozenHeaderEl} className="sticky top-0 z-30 space-y-4 bg-slate-100 pb-3 pt-1">
+      <div ref={setFrozenHeaderEl} className="sticky top-0 z-30 space-y-4 bg-[#f5faf7] pb-3 pt-1">
         <PageHeader
           subtitle={subtitle}
           actions={
             <button
-              onClick={() => createMutation.mutate()}
-              disabled={!canSubmit || createMutation.isPending}
+              onClick={() => saveDraftMutation.mutate()}
+              disabled={!isFormComplete || isBusy}
               className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
             >
-              Submit Request
+              Save Draft
             </button>
           }
         />
-        <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm">
+        <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm">
           <div>
             <label className="block font-medium text-emerald-800">Originating Department</label>
             <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{currentUser?.department?.name}</div>
@@ -169,11 +328,6 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
       <div className="space-y-4 lg:col-span-3">
-      <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
-        Approved by your Department Head, then the HR Analyst, then the HR Head. Approved requests are reflected in
-        the Manpower Budget's headcount for the selected company.
-      </div>
-
       <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <SectionLabel>Position Details</SectionLabel>
         <div>
@@ -241,6 +395,15 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
           />
         </div>
       </div>
+
+      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <SectionLabel>Approval</SectionLabel>
+        <ApproverPicker
+          label="Department Head / Approver"
+          value={form.departmentHeadId}
+          onChange={(v) => setForm({ ...form, departmentHeadId: v })}
+        />
+      </div>
       </div>
 
       <div className="space-y-4 lg:col-span-2">
@@ -250,7 +413,7 @@ export function AdditionalHeadcountTab({ subtitle }: { subtitle: string }) {
             <li>Pick the Position from the list. Rank and Company are needed too.</li>
             <li>Enter the Estimated Hire Date.</li>
             <li>Write a Justification for the headcount.</li>
-            <li>Submit Request. It goes to your Department Head, then the HR Analyst, then the HR Head.</li>
+            <li>Save Draft to keep it for later, or Submit Request. It goes to your Department Head, then the HR Analyst, then the HR Head.</li>
           </ol>
         </div>
       </div>

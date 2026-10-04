@@ -589,7 +589,7 @@ def submit_transfer(
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 f"The budget source ({t.budget_source_gl_account}/{t.budget_source_cost_center}) only has "
-                f"{available:,.2f} available, less than the requested {t.amount:,.2f}.",
+                f"{available:,.0f} available, less than the requested {t.amount:,.0f}.",
             )
 
     t.assigned_department_head_id = body.assignedDepartmentHeadId

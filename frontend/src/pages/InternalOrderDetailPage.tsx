@@ -102,7 +102,7 @@ export function InternalOrderDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
         <Field label="Requestor" value={io.requestorName} />
         <Field label="Department" value={io.departmentName} />
         <Field label="Fiscal Year" value={String(io.fiscalYear)} />

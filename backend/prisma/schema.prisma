@@ -107,11 +107,13 @@ enum RequestStage {
 }
 
 enum HeadcountRequestStage {
+  DRAFT
   DEPT_HEAD_REVIEW
   HR_ANALYST_REVIEW
   HR_HEAD_REVIEW
   APPROVED
   RETURNED
+  CANCELLED
 }
 
 // Notes_14: the Office 365 / Mobile Phone follow-ons are now a fixed
@@ -271,6 +273,7 @@ model User {
   attachments            Attachment[]
   bulkUploadBatches      BulkUploadBatch[]
   createdHeadcountRequests AdditionalHeadcountRequest[] @relation("HeadcountCreatedBy")
+  headcountDeptHeadRequests AdditionalHeadcountRequest[] @relation("HeadcountDeptHead")
   headcountReviewDecisions HeadcountReviewDecision[]
   manpowerTemplateUploadBatches ManpowerTemplateUploadBatch[]
   manpowerRosterSummaries  ManpowerRosterSummary[]
@@ -856,8 +859,9 @@ model AdditionalHeadcountRequest {
   // will reflect on the list of employees for Mobile Phone and other
   // sections that need employee list." Assigned at creation, sequential per
   // calendar year — stands in for a real employee record until this hire is
-  // actually imported into the roster.
-  code              String                @unique
+  // actually imported into the roster. Null while the request is a DRAFT;
+  // assigned when the draft is submitted.
+  code              String?               @unique
   position          String
   rank              Int
   companyId         String
@@ -866,9 +870,13 @@ model AdditionalHeadcountRequest {
   department        Department            @relation(fields: [departmentId], references: [id])
   estimatedHireDate DateTime
   justification     String
-  currentStage      HeadcountRequestStage @default(DEPT_HEAD_REVIEW)
+  currentStage      HeadcountRequestStage @default(DRAFT)
   createdById       String
   createdBy         User                  @relation("HeadcountCreatedBy", fields: [createdById], references: [id])
+  // The Department Head / Approver the requester picks, same as GAE. Only this
+  // user can act at DEPT_HEAD_REVIEW.
+  departmentHeadId  String?
+  departmentHead    User?                 @relation("HeadcountDeptHead", fields: [departmentHeadId], references: [id])
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
 

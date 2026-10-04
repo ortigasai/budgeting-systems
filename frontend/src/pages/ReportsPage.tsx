@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api2,
@@ -18,10 +19,9 @@ import { ExpandableSection } from "../components/ExpandableSection";
 import { useFiscalYear } from "../lib/fiscalCycle";
 import { KpiCards } from "./reports/KpiCards";
 import { ComparisonChart } from "./reports/ComparisonChart";
-import { ScopeDonutChart } from "./reports/ScopeDonutChart";
 import { ReportTable, type ComparisonMeta } from "./reports/ReportTable";
-import { PeriodGridTable } from "./reports/PeriodGridTable";
 import { TrendTable } from "./reports/TrendTable";
+import { GaeReportSection, gaeChartSeries, gaeKpiTotals, gaeSingleSeries, useGaeReport, type SingleMeasure } from "./reports/GaeReportSection";
 
 function peso(n: number) {
   return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -49,10 +49,14 @@ const COMPARISON_OPTIONS: { value: Exclude<ComparisonId, "trend">; label: string
   { value: "yoy-actual", label: "Last Year Actual vs Current Year Actual" },
   { value: "yoy-forecast", label: "Last Year Actual vs Current Year Forecast" },
   { value: "yoy-budget", label: "Last Year Actual vs Current Year Budget" },
-  { value: "monthly-comparison", label: "Monthly Comparison" },
-  { value: "quarterly-comparison", label: "Quarterly Comparison" },
 ];
-type SingleComparisonId = "budget-actual" | "budget-forecast" | "forecast-actual" | "yoy-actual" | "yoy-forecast" | "yoy-budget";
+const MEASURE_OPTIONS: { value: SingleMeasure; label: string }[] = [
+  { value: "actual", label: "Actual" },
+  { value: "budget", label: "Budget" },
+  { value: "forecast", label: "Forecast" },
+];
+
+type SingleComparisonId ="budget-actual" | "budget-forecast" | "forecast-actual" | "yoy-actual" | "yoy-forecast" | "yoy-budget";
 const COMPARISON_META: Record<SingleComparisonId, ComparisonMeta & { baselineLabel: string; targetLabel: string }> = {
   "budget-actual": { leftLabel: "Budget", leftKey: "budgetCurrent", rightLabel: "Actual", rightKey: "actualCurrent", varianceLabel: "Budget vs Actual", varianceKey: "variance", baselineLabel: "Budget", targetLabel: "Actual" },
   "budget-forecast": { leftLabel: "Budget", leftKey: "budgetCurrent", rightLabel: "Forecast", rightKey: "forecastCurrent", varianceLabel: "Budget vs Forecast", varianceKey: "varianceBudgetForecast", baselineLabel: "Budget", targetLabel: "Forecast" },
@@ -75,12 +79,8 @@ const GRANULARITY_TABS: { id: Granularity; label: string }[] = [
   { id: "ANNUAL", label: "Annual" },
 ];
 
-type PresetId = "executive-summary" | "variance-alert" | "5-year-trend";
-const PRESETS: { id: PresetId; label: string }[] = [
-  { id: "executive-summary", label: "Executive Summary" },
-  { id: "variance-alert", label: "Variance Alert View" },
-  { id: "5-year-trend", label: "5-Year Trend" },
-];
+type PresetId = "executive-summary" | "5-year-trend";
+const PRESETS: { id: PresetId; label: string }[] = [{ id: "executive-summary", label: "Executive Summary" }];
 
 // Phase 4 — Budget Report & Analysis (Note 12's dashboard redesign, revised
 // further per the follow-up note). Served by the FastAPI backend
@@ -91,7 +91,14 @@ export function ReportsPage() {
   const { forecastYear } = useFiscalYear();
   const queryClient = useQueryClient();
 
-  const [comparison, setComparison] = useState<ComparisonId>("budget-actual");
+  const [searchParams] = useSearchParams();
+  const [comparison, setComparison] = useState<ComparisonId>((searchParams.get("comparison") as ComparisonId) || "budget-actual");
+  // Monthly / Quarterly Comparison show one measure at a time - picked here.
+  const [measure, setMeasure] = useState<SingleMeasure>("actual");
+  useEffect(() => {
+    const next = searchParams.get("comparison") as ComparisonId | null;
+    if (next) setComparison(next);
+  }, [searchParams]);
   const [financialScope, setFinancialScope] = useState<FinancialScope[]>([]); // empty = Select All
   const [fiscalYear, setFiscalYear] = useState(forecastYear);
   const [granularity, setGranularity] = useState<Granularity>("YTD");
@@ -114,11 +121,12 @@ export function ReportsPage() {
 
   const calendarYears = calendarYearsEndingAt(forecastYear);
 
+  const navigate = useNavigate();
   const applyPreset = (id: PresetId) => {
     setActivePreset(id);
     setFinancialScope([]);
     if (id === "5-year-trend") {
-      setComparison("trend");
+      navigate("/reports/trend");
     } else {
       setComparison("budget-actual");
       setGranularity("YTD");
@@ -128,6 +136,11 @@ export function ReportsPage() {
 
   const isPeriodGrid = comparison === "monthly-comparison" || comparison === "quarterly-comparison";
   const isTrend = comparison === "trend";
+  // Last Year, Monthly and Quarterly comparisons are for the current calendar year only.
+  const currentYearOnly = comparison.startsWith("yoy") || isPeriodGrid;
+  useEffect(() => {
+    if (currentYearOnly) setFiscalYear(forecastYear);
+  }, [currentYearOnly, forecastYear]);
   const period = granularity;
   // Comma-joined, not a repeated query param - axios's default array
   // serialization (financialScope[]=X) doesn't match what FastAPI's
@@ -152,6 +165,15 @@ export function ReportsPage() {
     enabled: !isTrend && !isPeriodGrid,
   });
 
+  const gaeReport = useGaeReport(fiscalYear);
+  const [ytdThrough, setYtdThrough] = useState<number | null>(null);
+  const ytdMonthValue = ytdThrough ?? gaeReport.data?.asOfMonth ?? 12;
+  const gaeChart = gaeReport.data
+    ? isPeriodGrid
+      ? gaeSingleSeries(gaeReport.data, measure, granularity, ytdMonthValue, comparison === "quarterly-comparison")
+      : gaeChartSeries(gaeReport.data, comparison, granularity, ytdMonthValue)
+    : null;
+  const gaeKpi = gaeReport.data ? gaeKpiTotals(gaeReport.data, comparison, granularity, ytdMonthValue) : null;
   const { data: seriesPoints = [] } = useQuery({
     queryKey: ["reports", "series", fiscalYear, costCenter, glAccount, financialScope, sbu],
     queryFn: async () =>
@@ -174,16 +196,6 @@ export function ReportsPage() {
     enabled: isTrend,
   });
 
-  const { data: periodGrid } = useQuery({
-    queryKey: ["reports", "period-grid", fiscalYear, comparison, costCenter, glAccount, financialScope, sbu],
-    queryFn: async () =>
-      (
-        await api2.get<PeriodGridResult>("/reports/period-grid", {
-          params: { fiscalYear, granularity: comparison === "monthly-comparison" ? "MONTHLY" : "QUARTERLY", costCenter: costCenter || undefined, glAccount: glAccount || undefined, financialScope: scopeParam, sbu: sbuParam },
-        })
-      ).data,
-    enabled: isPeriodGrid,
-  });
 
   const { data: notes = [] } = useQuery({
     queryKey: ["reports", "notes", fiscalYear, notesGroup],
@@ -217,10 +229,6 @@ export function ReportsPage() {
   const notesRow = rows.find((r) => r.expenseGroup === notesGroup);
   const meta = isSingleComparison(comparison) ? COMPARISON_META[comparison] : null;
 
-  const scopeTotals: Record<FinancialScope, number> = { OPEX: 0, REVENUE: 0, NPC: 0 };
-  for (const r of rows) {
-    if (r.financialScope) scopeTotals[r.financialScope] += r.budgetCurrent;
-  }
 
   const toggleScope = (scope: FinancialScope) => {
     setFinancialScope((prev) => (prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope]));
@@ -229,6 +237,12 @@ export function ReportsPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-3">
       <PageHeader
+        subtitle={
+          <span className="font-medium text-slate-700">
+            Operating Expense - GAE
+            {currentYearOnly && <span className="ml-2 font-normal text-slate-500">· Calendar Year {forecastYear}</span>}
+          </span>
+        }
         actions={
           !isTrend &&
           !isPeriodGrid && (
@@ -242,50 +256,43 @@ export function ReportsPage() {
       {/* Section 0 - control bar: Primary Comparison / Financial Scope /
           Calendar Year / Time Granularity, per Note 12's own control table. */}
       <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Primary Comparison</label>
-            <select className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs" value={comparison === "trend" ? "budget-actual" : comparison} onChange={(e) => setComparison(e.target.value as ComparisonId)}>
-              {COMPARISON_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="relative">
-            <label className="block text-xs font-medium text-slate-600">Financial Scope</label>
-            <button onClick={() => setScopePickerOpen((o) => !o)} className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-left text-xs">
-              {financialScope.length === 0 ? "Select All" : financialScope.map((s) => FINANCIAL_SCOPE_OPTIONS.find((o) => o.value === s)?.label ?? s).join(", ")}
-            </button>
-            {scopePickerOpen && (
-              <div className="absolute z-10 mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs shadow-lg">
-                <label className="flex items-center gap-1.5 py-0.5">
-                  <input type="checkbox" checked={financialScope.length === 0} onChange={() => setFinancialScope([])} />
-                  Select All
-                </label>
-                {FINANCIAL_SCOPE_OPTIONS.map((o) => (
-                  <label key={o.value} className="flex items-center gap-1.5 py-0.5">
-                    <input type="checkbox" checked={financialScope.includes(o.value)} onChange={() => toggleScope(o.value)} />
-                    {o.label}
-                  </label>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {/* 5-Year Trend has no Primary Comparison - it shows Actual only. Monthly and Quarterly pick one measure. */}
+          {!isTrend && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600">Primary Comparison</label>
+              {isPeriodGrid ? (
+                <select className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs" value={measure} onChange={(e) => setMeasure(e.target.value as SingleMeasure)}>
+                  {MEASURE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <select className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs" value={comparison} onChange={(e) => setComparison(e.target.value as ComparisonId)}>
+                  {/* Only this sidebar menu's own comparisons: Budget/Actual/Forecast, or Last Year. */}
+                  {COMPARISON_OPTIONS.filter((o) => o.value.startsWith("yoy") === comparison.startsWith("yoy")).map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+          {!currentYearOnly && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600">Calendar Year</label>
+              <select className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs" value={fiscalYear} onChange={(e) => setFiscalYear(Number(e.target.value))}>
+                {calendarYears.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
                 ))}
-                <button onClick={() => setScopePickerOpen(false)} className="mt-1 w-full rounded bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-200">
-                  Done
-                </button>
-              </div>
-            )}
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600">Calendar Year</label>
-            <select className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs" value={fiscalYear} onChange={(e) => setFiscalYear(Number(e.target.value))}>
-              {calendarYears.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          </div>
+              </select>
+            </div>
+          )}
           {/* Note 12 revision - "Time Granularity for Monthly and Quarterly
               Comparison is not applicable" - hidden entirely for those two
               Primary Comparison modes and for 5-Year Trend (which has its
@@ -294,23 +301,28 @@ export function ReportsPage() {
             <div>
               <label className="block text-xs font-medium text-slate-600">Time Granularity</label>
               <div className="mt-0.5">
-                <TabBar tabs={GRANULARITY_TABS} active={granularity} onChange={setGranularity} />
+                <div className="flex items-center gap-2">
+                  <select value={granularity} onChange={(e) => setGranularity(e.target.value as Granularity)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                    {GRANULARITY_TABS.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                  {granularity === "YTD" && (
+                    <select value={ytdMonthValue} onChange={(e) => setYtdThrough(Number(e.target.value))} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                      {["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((label, i) => (
+                        <option key={label} value={i + 1}>through {label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
               </div>
             </div>
           )}
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2">
-          <span className="text-[11px] font-medium text-slate-500">Saved Views:</span>
-          {PRESETS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => applyPreset(p.id)}
-              className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${activePreset === p.id ? "bg-emerald-700 text-white" : "border border-slate-300 text-slate-600 hover:bg-slate-50"}`}
-            >
-              {p.label}
-            </button>
-          ))}
           <button onClick={() => setMoreFiltersOpen((o) => !o)} className="ml-auto text-[11px] font-medium text-emerald-700 hover:underline">
             {moreFiltersOpen ? "Hide filters" : "More filters"}
           </button>
@@ -371,12 +383,6 @@ export function ReportsPage() {
         )}
       </div>
 
-      {!isTrend && !isPeriodGrid && summary?.latestActualMonth && (
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs text-blue-800">
-          Current YTD Reporting Period: <span className="font-semibold">Jan–{MONTH_NAMES[summary.latestActualMonth - 1]} {summary.fiscalYear}</span> (latest month with posted Actuals)
-        </div>
-      )}
-
       {isTrend ? (
         <ExpandableSection title="5-Year Trend — Budget vs Actual">
           <div className="space-y-3">
@@ -389,38 +395,21 @@ export function ReportsPage() {
             <TrendTable points={trendPoints} />
           </div>
         </ExpandableSection>
-      ) : isPeriodGrid ? (
-        periodGrid && (
-          <ExpandableSection title={comparison === "monthly-comparison" ? "Monthly Comparison" : "Quarterly Comparison"}>
-            <PeriodGridTable data={periodGrid} />
-          </ExpandableSection>
-        )
       ) : (
         <>
-          {totals && meta && <KpiCards baselineLabel={meta.baselineLabel} baseline={rowMetric(totals, meta.leftKey)} targetLabel={meta.targetLabel} target={rowMetric(totals, meta.rightKey)} varianceLabel={meta.varianceLabel} />}
+          {gaeKpi ? <KpiCards {...gaeKpi} /> : totals && meta && <KpiCards baselineLabel={meta.baselineLabel} baseline={rowMetric(totals, meta.leftKey)} targetLabel={meta.targetLabel} target={rowMetric(totals, meta.rightKey)} varianceLabel={meta.varianceLabel} />}
 
           {/* Note 12 revision - table moved above the charts for every view
               (was below before this revision). */}
-          {meta && (
-            <ExpandableSection title="Budget Report Detail">
-              <ReportTable
-                key={tableResetKey}
-                rows={rows}
-                meta={meta}
-                notesGroup={notesGroup}
-                onToggleNotes={(group) => setNotesGroup(notesGroup === group ? null : group)}
-                initialSortByVariance={activePreset === "variance-alert"}
-                initialExpandOverThreshold={activePreset === "variance-alert"}
-                thresholdPct={varianceThresholdPct}
-                thresholdPeso={varianceThresholdPeso === "" ? null : varianceThresholdPeso}
-              />
-            </ExpandableSection>
-          )}
           {isLoading && <div className="text-center text-xs text-slate-400">Loading…</div>}
 
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              {meta && comparison !== "yoy-actual" && comparison !== "yoy-forecast" && comparison !== "yoy-budget" ? (
+          <div className="flex justify-center">
+            <div className="w-full max-w-4xl">
+              {gaeChart ? (
+                <ExpandableSection title="Comparison Chart">
+                  <ComparisonChart title="Comparison Chart" baselineLabel={gaeChart.baselineLabel} targetLabel={gaeChart.targetLabel} points={gaeChart.points} singleLabel={isPeriodGrid ? gaeChart.targetLabel : undefined} asLine={isPeriodGrid} />
+                </ExpandableSection>
+              ) : meta && comparison !== "yoy-actual" && comparison !== "yoy-forecast" && comparison !== "yoy-budget" ? (
                 <ExpandableSection title="Comparison Chart">
                   <ComparisonChart title="Comparison Chart" baselineLabel={meta.baselineLabel} targetLabel={meta.targetLabel} points={seriesPoints.map((p) => ({ period: p.period, baseline: p.budget, target: comparison === "forecast-actual" ? p.forecast ?? 0 : comparison === "budget-forecast" ? p.forecast ?? 0 : p.actual, variancePct: p.variancePct }))} />
                 </ExpandableSection>
@@ -430,9 +419,6 @@ export function ReportsPage() {
                 </div>
               )}
             </div>
-            <ExpandableSection title="Financial Scope Breakdown">
-              <ScopeDonutChart totalsByScope={scopeTotals} onSliceClick={(scope) => setFinancialScope([scope])} />
-            </ExpandableSection>
           </div>
         </>
       )}
@@ -481,6 +467,8 @@ export function ReportsPage() {
           </div>
         </div>
       )}
+
+      {comparison !== "trend" && <GaeReportSection fiscalYear={fiscalYear} granularity={granularity} comparison={comparison} ytdThrough={ytdMonthValue} measure={isPeriodGrid ? measure : undefined} />}
     </div>
   );
 }

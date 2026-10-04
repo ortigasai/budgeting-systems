@@ -697,7 +697,12 @@ export interface FollowOnMyDecision {
 
 export interface AdditionalHeadcountRequest {
   id: string;
-  code: string;
+  // Null while the request is a DRAFT; assigned on submit.
+  code: string | null;
+  // The Department Head / Approver the requester picked; only this user acts
+  // at DEPT_HEAD_REVIEW.
+  departmentHeadId: string | null;
+  departmentHead?: { id: string; name: string; email: string } | null;
   position: string;
   rank: number;
   companyId: string;
@@ -706,7 +711,7 @@ export interface AdditionalHeadcountRequest {
   department: Department;
   estimatedHireDate: string;
   justification: string;
-  currentStage: "DEPT_HEAD_REVIEW" | "HR_ANALYST_REVIEW" | "HR_HEAD_REVIEW" | "APPROVED" | "RETURNED";
+  currentStage: "DRAFT" | "DEPT_HEAD_REVIEW" | "HR_ANALYST_REVIEW" | "HR_HEAD_REVIEW" | "APPROVED" | "RETURNED";
   createdAt: string;
   createdBy: { name: string; email: string };
   reviewDecisions: HeadcountReviewDecision[];
@@ -750,11 +755,9 @@ export type ReportPeriod = "ANNUAL" | "Q1" | "Q2" | "Q3" | "Q4" | "MONTHLY" | "Y
 // Note 12 - "Financial Scope": Operating Expense (GAE+DOE combined),
 // Revenue, Non-Project Capex - a new grouping distinct from every other
 // category concept in this app (Expense Category, SBU).
-export type FinancialScope = "OPEX" | "REVENUE" | "NPC";
+export type FinancialScope = "GAE" | "DOE" | "COMMISSION" | "DA" | "INTEREST" | "REVENUE_COS" | "NPC";
 export const FINANCIAL_SCOPE_OPTIONS: { value: FinancialScope; label: string }[] = [
-  { value: "OPEX", label: "Operating Expense" },
-  { value: "REVENUE", label: "Revenue" },
-  { value: "NPC", label: "Non-Project Capex" },
+  { value: "GAE", label: "Operating Expense - GAE" },
 ];
 
 export interface ReportLineItem {

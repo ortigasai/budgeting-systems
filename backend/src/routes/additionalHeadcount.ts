@@ -11,6 +11,7 @@ import {
   hrHeadHeadcountDecision,
 } from "../services/headcountWorkflowService";
 import { resolveHeadcountRequestPendingReviewers } from "../lib/pendingReviewers";
+import { isHrAnalystReviewer, isHrHeadApprover } from "../lib/headcountHrHead";
 
 export const additionalHeadcountRouter = Router();
 
@@ -25,6 +26,7 @@ const DETAIL_INCLUDE = {
   // Mobile Phone follow-ons alongside the headcount request they came from.
   office365AccountRequest: { include: { reviewerDecidedBy: true, approverDecidedBy: true } },
   mobilePhoneBudgetRequest: { include: { reviewerDecidedBy: true, approverDecidedBy: true } },
+  departmentHead: true,
 } satisfies Prisma.AdditionalHeadcountRequestInclude;
 
 const createSchema = z.object({
@@ -33,6 +35,8 @@ const createSchema = z.object({
   companyId: z.string(),
   estimatedHireDate: z.string().datetime(),
   justification: z.string().min(1),
+  // Picked by the requester (Department Head / Approver), same as GAE.
+  departmentHeadId: z.string().min(1),
 });
 
 // Notes_8: "Submitted request will generate a code - MR-'YY'-001." Sequential
@@ -46,6 +50,21 @@ async function generateHeadcountCode(): Promise<string> {
   return `${prefix}${String(existing + 1).padStart(3, "0")}`;
 }
 
+// A draft is a saved form that hasn't been routed yet: it has no reference
+// code (that's assigned on submit) and sits at DRAFT, outside every Inbox.
+async function loadOwnDraft(id: string, userId: string) {
+  const request = await prisma.additionalHeadcountRequest.findUniqueOrThrow({ where: { id } });
+  if (request.createdById !== userId) throw new HttpError(403, "You can only edit your own drafts.");
+  if (request.currentStage !== HeadcountRequestStage.DRAFT) {
+    throw new HttpError(409, "This request has already been submitted.");
+  }
+  return request;
+}
+
+function draftData(body: z.infer<typeof createSchema>) {
+  return { ...body, estimatedHireDate: new Date(body.estimatedHireDate) };
+}
+
 additionalHeadcountRouter.post(
   "/",
   asyncHandler(async (req, res) => {
@@ -53,18 +72,59 @@ additionalHeadcountRouter.post(
     if (!departmentId) throw new HttpError(400, "Your account has no assigned department.");
 
     const body = createSchema.parse(req.body);
-    const code = await generateHeadcountCode();
     const created = await prisma.additionalHeadcountRequest.create({
       data: {
-        ...body,
-        code,
-        estimatedHireDate: new Date(body.estimatedHireDate),
+        ...draftData(body),
+        currentStage: HeadcountRequestStage.DRAFT,
         departmentId,
         createdById: req.user!.id,
       },
       include: DETAIL_INCLUDE,
     });
     res.status(201).json(created);
+  })
+);
+
+additionalHeadcountRouter.put(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    await loadOwnDraft(req.params.id, req.user!.id);
+    const body = createSchema.parse(req.body);
+    const updated = await prisma.additionalHeadcountRequest.update({
+      where: { id: req.params.id },
+      data: draftData(body),
+      include: DETAIL_INCLUDE,
+    });
+    res.json(updated);
+  })
+);
+
+// Cancels your own draft. The record is kept as CANCELLED (like GAE requests),
+// so it never reaches an Inbox and never gets a reference code.
+additionalHeadcountRouter.post(
+  "/:id/cancel",
+  asyncHandler(async (req, res) => {
+    await loadOwnDraft(req.params.id, req.user!.id);
+    const updated = await prisma.additionalHeadcountRequest.update({
+      where: { id: req.params.id },
+      data: { currentStage: HeadcountRequestStage.CANCELLED },
+      include: DETAIL_INCLUDE,
+    });
+    res.json(updated);
+  })
+);
+
+// Submitting assigns the reference code and routes to the Department Head.
+additionalHeadcountRouter.post(
+  "/:id/submit",
+  asyncHandler(async (req, res) => {
+    await loadOwnDraft(req.params.id, req.user!.id);
+    const updated = await prisma.additionalHeadcountRequest.update({
+      where: { id: req.params.id },
+      data: { code: await generateHeadcountCode(), currentStage: HeadcountRequestStage.DEPT_HEAD_REVIEW },
+      include: DETAIL_INCLUDE,
+    });
+    res.json(updated);
   })
 );
 
@@ -99,28 +159,18 @@ additionalHeadcountRouter.get(
 additionalHeadcountRouter.get(
   "/inbox",
   asyncHandler(async (req, res) => {
-    const clauses: Prisma.AdditionalHeadcountRequestWhereInput[] = [];
+    // Department Head Review goes to the approver the requester picked.
+    const clauses: Prisma.AdditionalHeadcountRequestWhereInput[] = [
+      { currentStage: HeadcountRequestStage.DEPT_HEAD_REVIEW, departmentHeadId: req.user!.id },
+    ];
 
-    for (const role of req.user!.roles) {
-      if (role.roleType === RoleType.DEPARTMENT_HEAD) {
-        clauses.push({ currentStage: HeadcountRequestStage.DEPT_HEAD_REVIEW, departmentId: role.departmentId! });
-      } else if (role.roleType === RoleType.HR_ANALYST) {
-        clauses.push({ currentStage: HeadcountRequestStage.HR_ANALYST_REVIEW });
-      } else if (role.roleType === RoleType.CENTRALIZED_DEPARTMENT_HEAD) {
-        // "HR Head" reuses Human Resources' Centralized Department Head —
-        // scoped by the reviewer's own department, not the (originating)
-        // request department, since HR Head reviews headcount requests from
-        // every department.
-        const hrDept = await prisma.department.findUnique({ where: { name: "Human Resources" } });
-        if (hrDept && hrDept.id === role.departmentId) {
-          clauses.push({ currentStage: HeadcountRequestStage.HR_HEAD_REVIEW });
-        }
-      }
+    // HR Analyst Review and HR Head Review are each pinned to one named reviewer
+    // (see headcountHrHead.ts).
+    if (isHrAnalystReviewer(req.user!)) {
+      clauses.push({ currentStage: HeadcountRequestStage.HR_ANALYST_REVIEW });
     }
-
-    if (clauses.length === 0) {
-      res.json([]);
-      return;
+    if (isHrHeadApprover(req.user!)) {
+      clauses.push({ currentStage: HeadcountRequestStage.HR_HEAD_REVIEW });
     }
 
     const requests = await prisma.additionalHeadcountRequest.findMany({
@@ -329,7 +379,12 @@ additionalHeadcountRouter.get(
   asyncHandler(async (_req, res) => {
     const [users, headcountRequests] = await Promise.all([
       prisma.user.findMany({ include: { department: true }, orderBy: { name: "asc" } }),
-      prisma.additionalHeadcountRequest.findMany({ include: { department: true }, orderBy: { code: "asc" } }),
+      // Drafts have no code yet, so they can't be picked as a pending hire.
+      prisma.additionalHeadcountRequest.findMany({
+        where: { code: { not: null } },
+        include: { department: true },
+        orderBy: { code: "asc" },
+      }),
     ]);
     const options = [
       ...users.map((u) => ({ id: u.id, name: u.name, department: u.department?.name ?? null })),
@@ -358,11 +413,10 @@ const decisionSchema = z.object({ decision: z.enum(["APPROVE", "RETURN"]), comme
 
 additionalHeadcountRouter.post(
   "/:id/decisions/dept-head",
-  requireRole(RoleType.DEPARTMENT_HEAD),
   asyncHandler(async (req, res) => {
     const request = await prisma.additionalHeadcountRequest.findUniqueOrThrow({ where: { id: req.params.id } });
-    if (!hasRole(req.user, RoleType.DEPARTMENT_HEAD, request.departmentId)) {
-      throw new HttpError(403, "You are not the Department Head for this request's department.");
+    if (request.departmentHeadId !== req.user!.id) {
+      throw new HttpError(403, "This request is not assigned to you at its current stage.");
     }
     const { decision, comment } = decisionSchema.parse(req.body);
     const updated = await deptHeadHeadcountDecision(req.params.id, req.user!.id, decision, comment);
@@ -372,8 +426,10 @@ additionalHeadcountRouter.post(
 
 additionalHeadcountRouter.post(
   "/:id/decisions/hr-analyst",
-  requireRole(RoleType.HR_ANALYST),
   asyncHandler(async (req, res) => {
+    if (!isHrAnalystReviewer(req.user!)) {
+      throw new HttpError(403, "Only the HR Analyst reviewer can decide this.");
+    }
     const { decision, comment } = decisionSchema.parse(req.body);
     const updated = await hrAnalystHeadcountDecision(req.params.id, req.user!.id, decision, comment);
     res.json(updated);
@@ -382,11 +438,9 @@ additionalHeadcountRouter.post(
 
 additionalHeadcountRouter.post(
   "/:id/decisions/hr-head",
-  requireRole(RoleType.CENTRALIZED_DEPARTMENT_HEAD),
   asyncHandler(async (req, res) => {
-    const hrDept = await prisma.department.findUniqueOrThrow({ where: { name: "Human Resources" } });
-    if (!hasRole(req.user, RoleType.CENTRALIZED_DEPARTMENT_HEAD, hrDept.id)) {
-      throw new HttpError(403, "Only the Human Resources Centralized Department Head can decide this.");
+    if (!isHrHeadApprover(req.user!)) {
+      throw new HttpError(403, "Only the HR Head approver can decide this.");
     }
     const { decision, comment } = decisionSchema.parse(req.body);
     const updated = await hrHeadHeadcountDecision(req.params.id, req.user!.id, decision, comment);

@@ -119,7 +119,7 @@ export function NpcRequestTab({ subtitle }: { subtitle: string }) {
           <div>
             <span className="font-medium">{FISCAL_YEAR} Amount (VAT exclusive):</span>
             {""}
-            <span className="font-bold text-emerald-800">{created.proposedAmount.toLocaleString()}</span>
+            <span className="font-bold text-emerald-800">{created.proposedAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
           </div>
           <div>
             <span className="font-medium">Attachments:</span>
@@ -142,7 +142,7 @@ export function NpcRequestTab({ subtitle }: { subtitle: string }) {
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
-      <div ref={setFrozenHeaderEl} className="sticky top-0 z-30 space-y-4 bg-slate-100 pb-3 pt-1">
+      <div ref={setFrozenHeaderEl} className="sticky top-0 z-30 space-y-4 bg-[#f5faf7] pb-3 pt-1">
       <PageHeader
         subtitle={subtitle}
         actions={
@@ -151,7 +151,7 @@ export function NpcRequestTab({ subtitle }: { subtitle: string }) {
           </button>
         }
       />
-      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm">
+      <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm">
         <div>
           <label className="block font-medium text-emerald-800">Originating Department</label>
           <div className="mt-1 rounded border border-emerald-200 bg-white px-2 py-1.5 text-emerald-950">{currentUser?.department?.name}</div>

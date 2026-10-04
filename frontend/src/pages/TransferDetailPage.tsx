@@ -154,7 +154,7 @@ export function TransferDetailPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 border-l-4 border-l-lime-600 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm shadow-sm sm:grid-cols-3">
             <Field label="Requestor" value={t.requestorName} />
             <Field label="Department" value={t.departmentName} />
             <Field label="Fiscal Year" value={String(t.fiscalYear)} />

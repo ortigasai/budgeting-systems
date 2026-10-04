@@ -292,3 +292,16 @@ class FinalizedBudgetLine(Phase1Model, table=True):
     sapDocumentNumber: Optional[str] = None
     finalizedAt: datetime
     finalizedById: str
+
+
+class NpcForecastEntry(Phase1Model, table=True):
+    """NPC Forecast module's per-budget-code remaining-month forecast (Node-owned,
+    read-only here). Keyed by calendar month (1-12), like HistoricalActuals.
+    """
+
+    __tablename__ = "NpcForecastEntry"
+
+    id: str = Field(primary_key=True)
+    budgetCode: str
+    fiscalYear: int
+    monthlyRemainingForecast: dict = Field(sa_column=Column("monthlyRemainingForecast", JSONB))
