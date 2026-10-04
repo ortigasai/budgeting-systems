@@ -16,6 +16,7 @@ import { BudgetCodesTab } from "./BudgetCodesTab";
 import { ForecastCategoryMappingsTab } from "./ForecastCategoryMappingsTab";
 import { ManpowerGlCcTab } from "./ManpowerGlCcTab";
 import { NpcMonitoringImportTab } from "./NpcMonitoringImportTab";
+import { GaePastDataImportTab } from "./GaePastDataImportTab";
 import { SapSyncStatusTab } from "./SapSyncStatusTab";
 import { AccessControlTab } from "./AccessControlTab";
 
@@ -48,6 +49,7 @@ export const ADMIN_TABS = [
   // NPC view - spans two modules, not owned by either alone.
   { id: "department-sbu", label: "Department SBU", group: "General" },
   { id: "expense-items", label: "Expense Line Items", group: "GAE" },
+  { id: "gae-past-data", label: "GAE Past Years Data", group: "GAE" },
   { id: "growth-rate", label: "Growth Rate", group: "GAE" },
   { id: "thresholds", label: "Thresholds", group: "GAE" },
   { id: "sbu-roles", label: "SBU Roles", group: "DOE" },
@@ -86,6 +88,7 @@ export function AdminConsolePage() {
       {tab === "io-locations" && <IoLocationsTab />}
       {tab === "cc-gl-codes" && <CcGlCodesTab />}
       {tab === "npc-monitoring" && <NpcMonitoringImportTab />}
+      {tab === "gae-past-data" && <GaePastDataImportTab />}
       {tab === "manpower-gl-cc" && <ManpowerGlCcTab />}
       {tab === "department-sbu" && <DepartmentSbuTab />}
       {tab === "report-access" && <ReportAccessTab />}
